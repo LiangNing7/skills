@@ -1,0 +1,152 @@
+---
+name: k8s-crd-api
+description: >-
+  Create or modify Kubernetes-style API packages under pkg/apis using an
+  internal/external version split. Trigger when the user asks to scaffold an API
+  group, add a Kind to an existing group, define Spec/Status fields, or turn a
+  pasted API definition into internal and versioned Go types. Covers API types,
+  scheme registration, install wiring, validation, defaulting, conditions, and
+  codegen metadata within pkg/apis. Do not use for generic Kubebuilder CRDs, CRD
+  manifests, apiserver REST registry or storage, controllers, or webhooks.
+---
+
+# Kubernetes API Package Engineering
+
+Generate Kubernetes-style API code under `pkg/apis/` using internal and external
+versions. This is not a generic Kubebuilder/controller-runtime CRD scaffolder.
+Inspect the target repository and preserve its local package and codegen
+conventions.
+
+Keep all hand-written output within `pkg/apis/**`. Do not create or modify
+apiserver REST registry/storage, controllers, webhook implementations, or CRD
+manifests.
+
+## When to use
+
+- "Create a new API group" (e.g. `ai.example.io`).
+- "Add a Kind to an existing group" (e.g. add `AIWorkload` to
+  `ai.example.io/v1alpha1`).
+- The user pastes a complete API or Go type definition and wants it turned into
+  internal and versioned API packages.
+
+## Model
+
+Use the hub-and-spoke multi-version model:
+
+- **internal** version (`runtime.APIVersionInternal`) — the canonical, in-process
+  form. Source of truth for controllers, validation, and defaulting.
+- **external** version (`v1alpha1` / `v1beta1` / `v1`) — the versioned wire form.
+- Conversion between them is **generated, never hand-written**.
+
+Layout:
+
+```
+pkg/apis/<group>/               # internal (package <group>)
+pkg/apis/<group>/<version>/     # external (package <version>)
+pkg/apis/<group>/install/       # installer
+pkg/apis/<group>/validation/    # hand-written validation
+```
+
+## Interview rules (grill style)
+
+1. Ask **one question at a time**; state each question's purpose and offer a
+   default so the user can accept with a single keystroke.
+2. Keep a **facts ledger**. Before asking, check the ledger and the repo
+   (`pkg/apis/**`). Never re-ask what the user already told you.
+3. **Fast path.** If the user already supplied a complete field definition
+   (full YAML/Go), do not re-ask — convert directly, then do one confirmation.
+4. **Phase order is fixed.** Advance only after the user confirms the phase
+   summary; do not jump back.
+5. Match the user's language for prose; keep code identifiers in English.
+
+## Classify the request
+
+Decide before asking anything:
+
+- **New Group** — the group is not under `pkg/apis/` and the user is creating
+  one.
+- **New Kind** — the group already exists (directory present or `GroupName`
+  already registered).
+- Ask a single disambiguating question only when it is genuinely ambiguous.
+
+## Workflow
+
+### Phase 1 — Resource location
+
+Collect, one at a time, skipping what is known:
+
+1. group name + domain → `GroupName = <name>.<domain>`
+2. version (default `v1alpha1` for a new API)
+3. Kind name (UpperCamelCase) — for a new Group, the first Kind
+4. scope (default `namespaced`)
+5. owners — new Group only (`approvers`/`reviewers` for `OWNERS`)
+
+Confirm the location before proceeding.
+
+### Phase 2 — Spec
+
+Ask for Spec fields. Allow a bulk list, then drill into ambiguous fields one at
+a time. For each field capture: name, Go type, JSON name, required/optional,
+default, enum, one-line description. Skip anything already supplied.
+
+### Phase 3 — Status
+
+Offer standard status fields as defaults (`ObservedGeneration`, `Conditions`)
+and ask which are needed, plus optional `FailureReason`/`FailureMessage`,
+`Phase`, and resource references.
+
+### Phase 4 — Conditions
+
+Ask whether the resource needs Conditions; collect ConditionTypes (offer
+`Ready`) and Reasons. If none, skip.
+
+### Phase 5 — Validation & defaults
+
+Map each rule to its layer:
+
+- field format (enum / pattern / min / max) → kubebuilder markers
+- cross-field rules → `validation/` package
+- default values → `defaults.go`
+- rules that must be enforced at runtime → `validation/` package
+
+### Phase 6 — Generate
+
+Determine the file set (`references/file-map.md`), write the hand-written files
+using the byte-level templates (`references/field-templates.md`,
+`references/group-skeleton.md`), then run or print codegen commands
+(`references/codegen.md`). Finish with a summary of what was written vs
+generated.
+
+## Generation rules
+
+- Write only hand-written files. Never hand-write `zz_generated.*` (deepcopy,
+  conversion, defaults), `generated.pb.go`, `types_swagger_doc_generated.go`, or
+  client/lister/informer code — those come from codegen tools.
+- Every exported field has a doc comment whose first word is the field name.
+- Use the exact standard comment phrases and `More info:` links from
+  `references/field-templates.md`.
+- Run `gofmt` on everything you write; do not hand-align struct tags.
+- Emit the codegen commands (or run them if the repo has a script) and remind
+  the user to run `verify-codegen` after.
+- Do not expand the task beyond `pkg/apis/**`; report any required integration
+  work outside that tree as a follow-up instead of implementing it.
+
+## Progressive loading
+
+Load this skill in layers — never pull everything into context at once.
+
+1. Only the `description` above is always present; it is the trigger.
+2. When triggered, this SKILL.md loads. It carries the workflow only. The
+   templates and skeletons in `references/` are not loaded yet.
+3. Read a reference file only when the current phase needs it, then stop.
+
+| Phase | Read (on demand) |
+|---|---|
+| 1 — Resource location | nothing |
+| 2 — Spec / 3 — Status | `references/field-templates.md` |
+| 4 — Conditions | `references/group-skeleton.md` |
+| 5 — Validation & defaults | `references/field-templates.md` + `references/group-skeleton.md` |
+| 6 — Generate | `references/file-map.md`, then `references/field-templates.md`, `references/group-skeleton.md`, `references/codegen.md` |
+
+Do not pre-load all references. Load the one the phase needs and release it once
+the phase is done.
