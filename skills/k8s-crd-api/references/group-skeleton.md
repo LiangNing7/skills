@@ -146,6 +146,10 @@ project exposes it (e.g. a legacy scheme or an apiserver scheme), and keep the
 
 ## OWNERS (`pkg/apis/<group>/OWNERS`)
 
+Do not create or modify the top-level `pkg/apis/OWNERS`; inspect it only to
+understand inherited ownership. Create the group-level file below only for a
+new group and only when neighboring groups use this convention.
+
 ```yaml
 reviewers:
   - <reviewer>
@@ -154,9 +158,9 @@ labels:
   - <domain>/<group-package>
 ```
 
-Top-level `pkg/apis/OWNERS` holds global approvers. Group OWNERS normally refine
-reviewers and labels without duplicating approvers; preserve the repository's
-existing label namespace.
+The existing top-level file supplies inherited approvers. Group OWNERS normally
+refine reviewers and labels without duplicating approvers; preserve the
+repository's existing label namespace.
 
 ## Conditions (`condition_types.go`)
 

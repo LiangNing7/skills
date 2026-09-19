@@ -4,7 +4,7 @@
 
 | File | Owner |
 |---|---|
-| `doc.go`, `register.go`, `<kind>_types.go`, `<kind>_phase_types.go`, condition/common types, `defaults.go`, `validation/`, `install/`, `OWNERS`, `fuzzer/`, API tests | **hand-written (you write)** |
+| `doc.go`, `register.go`, `<kind>_types.go`, `<kind>_phase_types.go`, condition/common types, `defaults.go`, `validation/`, `install/`, group-level `<group>/OWNERS`, `fuzzer/`, API tests | **hand-written (you write)** |
 | `zz_generated.deepcopy.go` | `deepcopy-gen` |
 | `zz_generated.conversion.go` | `conversion-gen` |
 | `zz_generated.defaults.go` | `defaulter-gen` |

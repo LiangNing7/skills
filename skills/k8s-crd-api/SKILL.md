@@ -82,9 +82,10 @@ Collect, one at a time, skipping what is known:
 2. version (default `v1alpha1` for a new API)
 3. Kind name (UpperCamelCase) — for a new Group, the first Kind
 4. scope (default `namespaced`)
-5. owners — new Group only; inspect `pkg/apis/OWNERS` and neighboring group
-   files before deciding whether group `OWNERS` needs reviewers, approvers, and
-   labels
+5. owners — new Group only; read `pkg/apis/OWNERS` and neighboring group
+   OWNERS files as read-only conventions, then create only
+   `pkg/apis/<group>/OWNERS` when sibling groups use one. Never create or modify
+   the top-level `pkg/apis/OWNERS`.
 
 Confirm the location before proceeding.
 
@@ -142,6 +143,9 @@ vs generated.
   `references/field-templates.md`.
 - Copy the repository's copyright boilerplate and package import-comment style
   from adjacent `pkg/apis` files; do not invent a new header.
+- Treat `pkg/apis/OWNERS` as read-only inherited policy. This skill may create
+  or edit only `pkg/apis/<group>/OWNERS`, and only when the task is a new group
+  or the user explicitly asks to change group ownership.
 - Run `gofmt` on everything you write; do not hand-align struct tags.
 - Run `go run <skill>/scripts/check-exported-docs.go -- <written .go files>`
   before codegen. Fix every finding in hand-written files.
