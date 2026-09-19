@@ -57,8 +57,9 @@ Rules:
 - `TypeMeta` has **no** comment and **no** protobuf tag, only `json:",inline"`.
 - Omit `+genclient` in the internal package. Preserve external protobuf tags;
   internal protobuf tags follow the existing group convention.
-- The four fixed status phrases ("This data may be out of date… /
-  Populated by the system. / Read-only.") are mandatory.
+- The status comment should convey "most recently observed status", that the
+  data may be out of date, "Populated by the system.", and "Read-only."; the
+  exact wording varies between groups, so match the neighboring files.
 - The two `More info:` links are fixed; do not rewrite them.
 
 ## List object (same file)
@@ -164,6 +165,34 @@ constant name. Describe the state, whether it is terminal, and the transition
 out when that information is known. Include only values confirmed during the
 interview; the four values above demonstrate formatting, not a mandatory set.
 
+## Phase accessors
+
+When `Status` carries the phase as a raw `Phase string` field, add typed
+accessors so callers convert through the enum instead of comparing raw strings.
+List every non-`Unknown` value in the switch; unrecognized values fall back to
+`Unknown`.
+
+```go
+// SetTypedPhase sets the Phase field to the string representation of <Kind>Phase.
+func (s *<Kind>Status) SetTypedPhase(p <Kind>Phase) {
+	s.Phase = string(p)
+}
+
+// GetTypedPhase attempts to parse the Phase field and return
+// the typed <Kind>Phase representation as described in `<kind>_phase_types.go`.
+func (s *<Kind>Status) GetTypedPhase() <Kind>Phase {
+	switch phase := <Kind>Phase(s.Phase); phase {
+	case
+		<Kind>PhasePending,
+		<Kind>PhaseRunning,
+		<Kind>PhaseFailed:
+		return phase
+	default:
+		return <Kind>PhaseUnknown
+	}
+}
+```
+
 ## Typed string enums
 
 Put `// +enum` immediately above the type declaration, not above the `const`
@@ -218,9 +247,12 @@ const (
    - `Standard object's metadata.`
    - `Standard list metadata.`
    - `Specification of the desired behavior of the <kind>.`
-   - `Status is the most recently observed status of the <Kind>.`
    - `Populated by the system.` / `Read-only.`
-   - `Items is a list of schema objects.`
+   The Status opening line and the Items line follow common patterns but vary
+   between groups — e.g. `Status is the most recently observed status of the
+   <Kind>.` vs `Most recently observed status of the <kind>.`, and
+   `Items is a list of schema objects.` vs `items is the list of <Kind>s.`.
+   Match the neighboring files.
 6. Fixed links — do not rewrite:
    - `...#metadata`
    - `...#spec-and-status`

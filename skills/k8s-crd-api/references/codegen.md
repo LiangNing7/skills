@@ -8,7 +8,7 @@
 | `zz_generated.deepcopy.go` | `deepcopy-gen` |
 | `zz_generated.conversion.go` | `conversion-gen` |
 | `zz_generated.defaults.go` | `defaulter-gen` |
-| `types_swagger_doc_generated.go` | repository Swagger-doc generator (for onex, `gen-swaggertype-docs`) |
+| `types_swagger_doc_generated.go` | repository Swagger-doc generator |
 | `generated.pb.go` / `generated.proto` | protobuf generator |
 | clientset / listers / informers | `client-gen` / `lister-gen` / `informer-gen` |
 | applyconfigurations | `applyconfiguration-gen` |
@@ -62,12 +62,14 @@ committed output matches a fresh run.
 
 1. Detect a repo script (`scripts/update-codegen.sh`, a `Makefile` target, or
    `hack/`). Inspect its supported targets before running it.
-2. Prefer focused targets that update API-package artifacts only. In an
-   onex-style repository this is typically:
+2. Prefer focused targets that update API-package artifacts only, for example:
 
 ```bash
 scripts/update-codegen.sh protobuf deepcopy swagger defaults conversions
 ```
+
+   Read the target names from the repository's own codegen script; the example
+   above is illustrative, not authoritative.
 
    Do not run client/lister/informer/applyconfiguration or repository-wide
    OpenAPI targets when that would write outside `pkg/apis/**` unless the user

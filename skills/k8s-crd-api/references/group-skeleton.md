@@ -27,8 +27,8 @@ package <group>
 package <version>
 ```
 
-The onex-style external API is protobuf-enabled. For an existing repository,
-preserve the marker set and order from a neighboring external package.
+This external API is protobuf-enabled. For an existing repository, preserve
+the marker set and order from a neighboring external package.
 
 ## register.go — internal
 

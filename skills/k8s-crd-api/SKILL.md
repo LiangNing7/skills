@@ -79,7 +79,8 @@ Decide before asking anything:
 Collect, one at a time, skipping what is known:
 
 1. group name + domain → `GroupName = <name>.<domain>`
-2. version (default `v1alpha1` for a new API)
+2. version — for a new group, ask which version to use (e.g. `v1alpha1`);
+   for an existing group, reuse its existing version
 3. Kind name (UpperCamelCase) — for a new Group, the first Kind
 4. scope (default `namespaced`)
 5. owners — new Group only; read `pkg/apis/OWNERS` and neighboring group

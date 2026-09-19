@@ -11,6 +11,8 @@ pkg/apis/<group>/<kind>_types.go
 pkg/apis/<group>/<kind>_phase_types.go      # if Status.Phase is used
 pkg/apis/<group>/condition_types.go            # if conditions
 pkg/apis/<group>/common_types.go               # if shared constants/types
+pkg/apis/<group>/well_known_annotations.go     # if group-level annotation keys
+pkg/apis/<group>/well_known_labels.go          # if group-level label keys
 pkg/apis/<group>/OWNERS                     # new group only, if siblings use it; never pkg/apis/OWNERS
 
 pkg/apis/<group>/<version>/doc.go              # external markers
@@ -27,6 +29,10 @@ pkg/apis/<group>/fuzzer/doc.go + fuzzer.go
 pkg/apis/<group>/validation/validation_<kind>.go
 pkg/apis/<group>/validation/validation_<kind>_test.go
 ```
+
+Group-level annotation and label keys go in `well_known_annotations.go` /
+`well_known_labels.go` when the repository splits them out; otherwise put them
+in `common_types.go`.
 
 Create validation files only when the resource has enforceable rules, but do not
 omit object metadata validation from a served resource. Then run the applicable
