@@ -11,11 +11,23 @@ templates. Replace placeholders only.
 | `<kind>` | lowercase singular | `chain` |
 | `<plural>` | lowercase plural (resource name) | `chains` |
 | `<group>` | DNS-subdomain group | `apps.example.io` |
+| `<domain>` | project API domain without the group prefix | `example.io` |
 
 ## Top-level object (`<kind>_types.go`)
 
+Use this marker block on the external root object:
+
 ```go
+// +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+```
+
+Add `// +genclient:nonNamespaced` between those lines for a cluster-scoped
+resource. Use only the deepcopy marker internally. After the applicable marker
+block and one blank line, write the object. This example shows the required
+external protobuf tags; internal tags follow the neighboring group:
+
+```go
 
 // <Kind> is the Schema for the <plural> API.
 type <Kind> struct {
@@ -36,13 +48,15 @@ type <Kind> struct {
 	// Read-only.
 	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
 	// +optional
-	Status <Kind>Status `json:"status,omitempty"`
+	Status <Kind>Status `json:"status,omitempty" protobuf:"bytes,3,opt,name=status"`
 }
 ```
 
 Rules:
 
 - `TypeMeta` has **no** comment and **no** protobuf tag, only `json:",inline"`.
+- Omit `+genclient` in the internal package. Preserve external protobuf tags;
+  internal protobuf tags follow the existing group convention.
 - The four fixed status phrases ("This data may be out of date… /
   Populated by the system. / Read-only.") are mandatory.
 - The two `More info:` links are fixed; do not rewrite them.
@@ -97,11 +111,11 @@ directly above the tag.
 type <Kind>Status struct {
 	// ObservedGeneration is the latest generation observed by the controller.
 	// +optional
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+	ObservedGeneration int64 `json:"observedGeneration,omitempty" protobuf:"varint,1,opt,name=observedGeneration"`
 
 	// Conditions defines the current state of the <Kind>.
 	// +optional
-	Conditions Conditions `json:"conditions,omitempty"`
+	Conditions Conditions `json:"conditions,omitempty" protobuf:"bytes,2,rep,name=conditions"`
 }
 ```
 
@@ -111,9 +125,13 @@ type <Kind>Status struct {
 const (
 	// <Kind>Finalizer is the finalizer used by the <Kind> controller to
 	// clean up referenced template resources if necessary when a <Kind> is being deleted.
-	<Kind>Finalizer = "<kind>.<group>/finalizer"
+	<Kind>Finalizer = "<kind>.<domain>/finalizer"
 )
 ```
+
+Derive `<domain>` from neighboring finalizers. Do not blindly append the full
+API group: for group `apps.example.io`, the established value may be
+`chain.example.io/finalizer`, not `chain.apps.example.io/finalizer`.
 
 ## Phase enum (`<kind>_phase_types.go`)
 
@@ -123,14 +141,45 @@ const (
 // It is a high-level indicator of the <kind>'s state from the API user's
 // perspective. Controllers must not rely on it for decisions; they must
 // inspect the actual state fields instead.
+// +enum
 type <Kind>Phase string
 
-// +enum
 const (
+	// <Kind>PhasePending indicates that <describe what is pending and what ends this phase>.
 	<Kind>PhasePending = <Kind>Phase("Pending")
+
+	// <Kind>PhaseRunning indicates that <describe the observable running state>.
 	<Kind>PhaseRunning = <Kind>Phase("Running")
+
+	// <Kind>PhaseFailed indicates that <describe terminality and required intervention>.
 	<Kind>PhaseFailed  = <Kind>Phase("Failed")
+
+	// <Kind>PhaseUnknown indicates that the current state cannot be determined.
 	<Kind>PhaseUnknown = <Kind>Phase("Unknown")
+)
+```
+
+Every Phase value gets its own non-tautological comment beginning with the
+constant name. Describe the state, whether it is terminal, and the transition
+out when that information is known. Include only values confirmed during the
+interview; the four values above demonstrate formatting, not a mandatory set.
+
+## Typed string enums
+
+Put `// +enum` immediately above the type declaration, not above the `const`
+block. Document every exported value separately:
+
+```go
+// <Kind>Mode identifies how <Kind> executes.
+// +enum
+type <Kind>Mode string
+
+const (
+	// <Kind>ModeAutomatic lets the system choose the execution strategy.
+	<Kind>ModeAutomatic <Kind>Mode = "Automatic"
+
+	// <Kind>ModeManual requires the user to choose the execution strategy.
+	<Kind>ModeManual <Kind>Mode = "Manual"
 )
 ```
 
@@ -152,22 +201,31 @@ const (
 
 ## Hard rules
 
-1. Every field has a doc comment; the first word is the field name (golint).
-2. `json` tag: camelCase; `omitempty` for optional fields; `json:",inline"` for
+1. Every exported package-level type, constant, variable, function, and method
+   has a doc comment beginning with its exact identifier. A shared heading above
+   a `const` block does not replace per-constant comments.
+2. Every named API struct field has a semantic doc comment. Prefer starting it
+   with the field name; preserve the fixed Kubernetes metadata/spec/status
+   phrases below where required. Anonymous `TypeMeta` is the only ordinary
+   no-comment field in these templates.
+3. `json` tag: camelCase; `omitempty` for optional fields; `json:",inline"` for
    embedded metadata.
-3. `protobuf` tag (external version required; internal optional): sequence
+4. `protobuf` tag (external version required; internal follows the group): sequence
    numbers unique, stable, increasing from 1 within a struct; `opt` = optional,
-   `rep` = repeated; `name=` matches the json name; `casttype=` for type aliases.
-4. Fixed phrases — do not rewrite:
+   `rep` = repeated; `name=` matches the json name; `casttype=` for type aliases;
+   use `varint` for integer/bool scalars and `bytes` for strings/messages.
+5. Fixed phrases — do not rewrite:
    - `Standard object's metadata.`
    - `Standard list metadata.`
    - `Specification of the desired behavior of the <kind>.`
    - `Status is the most recently observed status of the <Kind>.`
    - `Populated by the system.` / `Read-only.`
    - `Items is a list of schema objects.`
-5. Fixed links — do not rewrite:
+6. Fixed links — do not rewrite:
    - `...#metadata`
    - `...#spec-and-status`
-6. Blank line between the `+k8s:deepcopy-gen` marker and the `// <Kind> is ...`
+7. Blank line between the final root marker and the `// <Kind> is ...`
    doc comment; `// +optional` abuts the tag.
-7. `gofmt` aligns embedded-field tags (`metav1.TypeMeta`); never hand-align.
+8. Keep a blank line between independently documented enum constants; this
+   keeps each doc comment attached to the intended declaration.
+9. `gofmt` aligns embedded-field tags (`metav1.TypeMeta`); never hand-align.

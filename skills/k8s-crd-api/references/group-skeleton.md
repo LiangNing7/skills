@@ -17,6 +17,7 @@ package <group>
 ```go
 // +k8s:openapi-gen=true
 // +k8s:deepcopy-gen=package
+// +k8s:protobuf-gen=package
 // +k8s:conversion-gen=<internal import path>
 // +k8s:conversion-gen-external-types=<this package import path>
 // +k8s:defaulter-gen=TypeMeta
@@ -26,7 +27,8 @@ package <group>
 package <version>
 ```
 
-Add `+k8s:protobuf-gen=package` only when protobuf bindings are wanted.
+The onex-style external API is protobuf-enabled. For an existing repository,
+preserve the marker set and order from a neighboring external package.
 
 ## register.go — internal
 
@@ -94,8 +96,10 @@ func Resource(resource string) schema.GroupResource {
 }
 
 var (
+	// SchemeBuilder stores functions to add things to a scheme.
 	SchemeBuilder      = runtime.NewSchemeBuilder(addKnownTypes, addDefaultingFuncs)
 	localSchemeBuilder = &SchemeBuilder
+	// AddToScheme applies all stored functions to a scheme.
 	AddToScheme        = localSchemeBuilder.AddToScheme
 )
 
@@ -143,28 +147,40 @@ project exposes it (e.g. a legacy scheme or an apiserver scheme), and keep the
 ## OWNERS (`pkg/apis/<group>/OWNERS`)
 
 ```yaml
-approvers:
-  - <maintainer>
 reviewers:
   - <reviewer>
 labels:
-  - <group>
+  - <domain>/scheme
+  - <domain>/<group-package>
 ```
 
-Top-level `pkg/apis/OWNERS` holds global approvers; group OWNERS refine
-reviewers and labels.
+Top-level `pkg/apis/OWNERS` holds global approvers. Group OWNERS normally refine
+reviewers and labels without duplicating approvers; preserve the repository's
+existing label namespace.
 
 ## Conditions (`condition_types.go`)
+
+Define the same API shape in both packages, using `core.ConditionStatus`
+internally and `corev1.ConditionStatus` externally. External fields require
+protobuf tags; internal tags follow the neighboring package convention. The
+external form is:
 
 ```go
 // ConditionSeverity expresses the severity of a Condition Type failing.
 type ConditionSeverity string
 
 const (
-	ConditionSeverityError   ConditionSeverity = "Error"
+	// ConditionSeverityError specifies that a condition with Status=False is an error.
+	ConditionSeverityError ConditionSeverity = "Error"
+
+	// ConditionSeverityWarning specifies that a condition with Status=False is a warning.
 	ConditionSeverityWarning ConditionSeverity = "Warning"
-	ConditionSeverityInfo    ConditionSeverity = "Info"
-	ConditionSeverityNone    ConditionSeverity = ""
+
+	// ConditionSeverityInfo specifies that a condition with Status=False is informative.
+	ConditionSeverityInfo ConditionSeverity = "Info"
+
+	// ConditionSeverityNone applies only to conditions with Status=True.
+	ConditionSeverityNone ConditionSeverity = ""
 )
 
 // ConditionType is a valid value for Condition.Type.
@@ -172,61 +188,50 @@ type ConditionType string
 
 // Condition defines an observation of a resource's operational state.
 type Condition struct {
-	// Type of condition in CamelCase or in foo.example.com/CamelCase.
-	Type ConditionType `json:"type"`
+	// Type identifies the condition in CamelCase or in example.io/CamelCase form.
+	Type ConditionType `json:"type" protobuf:"bytes,1,opt,name=type,casttype=ConditionType"`
 
-	// Status of the condition, one of True, False, Unknown.
-	Status metav1.ConditionStatus `json:"status"`
+	// Status is one of True, False, or Unknown.
+	Status corev1.ConditionStatus `json:"status" protobuf:"bytes,2,opt,name=status,casttype=k8s.io/api/core/v1.ConditionStatus"`
 
 	// Severity provides an explicit classification of the Reason code.
 	// The Severity field MUST be set only when Status=False.
 	// +optional
-	Severity ConditionSeverity `json:"severity,omitempty"`
+	Severity ConditionSeverity `json:"severity" protobuf:"bytes,3,opt,name=severity,casttype=ConditionSeverity"`
 
-	// Last time the condition transitioned from one status to another.
-	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty"`
+	// LastTransitionTime records when the condition last changed status.
+	LastTransitionTime metav1.Time `json:"lastTransitionTime,omitempty" protobuf:"bytes,4,opt,name=lastTransitionTime"`
 
-	// The reason for the condition's last transition in CamelCase.
+	// Reason identifies the condition's last transition in CamelCase.
 	// +optional
-	Reason string `json:"reason,omitempty"`
+	Reason string `json:"reason,omitempty" protobuf:"bytes,5,opt,name=reason"`
 
-	// A human readable message indicating details about the transition.
+	// Message provides human-readable details about the transition.
 	// +optional
-	Message string `json:"message,omitempty"`
+	Message string `json:"message,omitempty" protobuf:"bytes,6,opt,name=message"`
 }
 
 // Conditions provide observations of the operational state of a resource.
 type Conditions []Condition
 ```
 
-ConditionType / Reason constants go in `condition_consts.go` (external version),
-each documented with its Severity semantics. Add `GetConditions()` /
-`SetConditions()` on the root object:
+In the internal copy, replace `corev1.ConditionStatus` with
+`core.ConditionStatus`; keep the cast target pointing to
+`k8s.io/api/core/v1.ConditionStatus` when protobuf tags are present.
+
+ConditionType / Reason constants go in `condition_consts.go` (external version).
+Every exported constant gets its own identifier-first comment. Reason comments
+include `(Severity=Error|Warning|Info)` when the reason represents a false
+condition. Add documented `GetConditions()` / `SetConditions()` methods on the
+external root object:
 
 ```go
+// GetConditions returns the conditions for this object.
 func (x *<Kind>) GetConditions() Conditions { return x.Status.Conditions }
+
+// SetConditions sets the conditions for this object.
 func (x *<Kind>) SetConditions(c Conditions) { x.Status.Conditions = c }
 ```
 
-## Defaulting (`defaults.go`, external version — hand-written)
-
-```go
-func addDefaultingFuncs(scheme *runtime.Scheme) error {
-	return RegisterDefaults(scheme)
-}
-
-// SetDefaults_<Kind> sets defaults for <Kind>.
-func SetDefaults_<Kind>(obj *<Kind>) {
-	SetDefaults_<Kind>Spec(&obj.Spec)
-}
-
-// SetDefaults_<Kind>Spec sets defaults for <Kind> spec.
-func SetDefaults_<Kind>Spec(obj *<Kind>Spec) {
-	if obj.Field == "" {
-		obj.Field = "<default>"
-	}
-}
-```
-
-`RegisterDefaults` and `SetObjectDefaults_*` are generated
-(`zz_generated.defaults.go`) — never hand-write them.
+For defaulting and runtime validation, read
+[`validation-defaulting.md`](validation-defaulting.md) only in Phase 5.

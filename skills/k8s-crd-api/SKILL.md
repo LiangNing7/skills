@@ -34,9 +34,12 @@ manifests.
 Use the hub-and-spoke multi-version model:
 
 - **internal** version (`runtime.APIVersionInternal`) — the canonical, in-process
-  form. Source of truth for controllers, validation, and defaulting.
+  form used by controllers and runtime validation.
 - **external** version (`v1alpha1` / `v1beta1` / `v1`) — the versioned wire form.
-- Conversion between them is **generated, never hand-written**.
+  Scheme defaulting is registered here.
+- Generate mechanical conversion between matching representations. If the two
+  versions differ semantically, stop and report the need for a reviewed manual
+  conversion instead of forcing generated conversion.
 
 Layout:
 
@@ -79,7 +82,9 @@ Collect, one at a time, skipping what is known:
 2. version (default `v1alpha1` for a new API)
 3. Kind name (UpperCamelCase) — for a new Group, the first Kind
 4. scope (default `namespaced`)
-5. owners — new Group only (`approvers`/`reviewers` for `OWNERS`)
+5. owners — new Group only; inspect `pkg/apis/OWNERS` and neighboring group
+   files before deciding whether group `OWNERS` needs reviewers, approvers, and
+   labels
 
 Confirm the location before proceeding.
 
@@ -93,39 +98,53 @@ default, enum, one-line description. Skip anything already supplied.
 
 Offer standard status fields as defaults (`ObservedGeneration`, `Conditions`)
 and ask which are needed, plus optional `FailureReason`/`FailureMessage`,
-`Phase`, and resource references.
+`Phase`, and resource references. When Phase is selected, collect every value
+and a distinct semantic description for each value; do not infer undocumented
+constants.
 
 ### Phase 4 — Conditions
 
 Ask whether the resource needs Conditions; collect ConditionTypes (offer
-`Ready`) and Reasons. If none, skip.
+`Ready`) and Reasons. Capture the meaning of every exported ConditionType and
+Reason, including false-condition severity where applicable. If none, skip.
 
 ### Phase 5 — Validation & defaults
 
 Map each rule to its layer:
 
-- field format (enum / pattern / min / max) → kubebuilder markers
-- cross-field rules → `validation/` package
+- field format (enum / pattern / min / max) → schema markers for documentation
+  and generation, plus `validation/` when the API server must enforce it
+- object, update, status, and cross-field rules → `validation/` package
 - default values → `defaults.go`
 - rules that must be enforced at runtime → `validation/` package
+
+Read `references/validation-defaulting.md` in this phase.
 
 ### Phase 6 — Generate
 
 Determine the file set (`references/file-map.md`), write the hand-written files
 using the byte-level templates (`references/field-templates.md`,
 `references/group-skeleton.md`), then run or print codegen commands
-(`references/codegen.md`). Finish with a summary of what was written vs
-generated.
+(`references/codegen.md`). Add the group-level fuzzer and round-trip coverage
+described in `references/testing.md`. Finish with a summary of what was written
+vs generated.
 
 ## Generation rules
 
 - Write only hand-written files. Never hand-write `zz_generated.*` (deepcopy,
   conversion, defaults), `generated.pb.go`, `types_swagger_doc_generated.go`, or
   client/lister/informer code — those come from codegen tools.
-- Every exported field has a doc comment whose first word is the field name.
+- Every exported package-level type, constant, variable, function, and method
+  has a doc comment beginning with its exact identifier. Every named API struct
+  field has a semantic comment; fixed Kubernetes metadata/spec/status phrases
+  in the templates are intentional exceptions to identifier-first wording.
 - Use the exact standard comment phrases and `More info:` links from
   `references/field-templates.md`.
+- Copy the repository's copyright boilerplate and package import-comment style
+  from adjacent `pkg/apis` files; do not invent a new header.
 - Run `gofmt` on everything you write; do not hand-align struct tags.
+- Run `go run <skill>/scripts/check-exported-docs.go -- <written .go files>`
+  before codegen. Fix every finding in hand-written files.
 - Emit the codegen commands (or run them if the repo has a script) and remind
   the user to run `verify-codegen` after.
 - Do not expand the task beyond `pkg/apis/**`; report any required integration
@@ -145,8 +164,8 @@ Load this skill in layers — never pull everything into context at once.
 | 1 — Resource location | nothing |
 | 2 — Spec / 3 — Status | `references/field-templates.md` |
 | 4 — Conditions | `references/group-skeleton.md` |
-| 5 — Validation & defaults | `references/field-templates.md` + `references/group-skeleton.md` |
-| 6 — Generate | `references/file-map.md`, then `references/field-templates.md`, `references/group-skeleton.md`, `references/codegen.md` |
+| 5 — Validation & defaults | `references/validation-defaulting.md` |
+| 6 — Generate | `references/file-map.md`, then only the templates needed from `references/field-templates.md` / `references/group-skeleton.md`, then `references/testing.md` and `references/codegen.md` |
 
 Do not pre-load all references. Load the one the phase needs and release it once
 the phase is done.
