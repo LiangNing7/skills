@@ -18,6 +18,28 @@ Generators emit mechanical boilerplate. Anything with business semantics
 hand-written. Never edit a `zz_generated.*`, `generated.pb.go`,
 `generated.proto`, or `types_swagger_doc_generated.go` file by hand.
 
+## What must be generated — and what may be skipped
+
+Codegen completeness is not optional. A complete `pkg/apis/<group>/<version>/`
+package carries every "always generate" artifact below; producing a subset (for
+example skipping protobuf or defaulting because a first pass has no default
+values) leaves an incomplete API package.
+
+| Tier | Artifacts | Generator |
+|---|---|---|
+| **Always generate** | `zz_generated.deepcopy.go` | `deepcopy-gen` |
+| | `zz_generated.conversion.go` | `conversion-gen` |
+| | `zz_generated.defaults.go` | `defaulter-gen` |
+| | `generated.pb.go` + `generated.proto` | protobuf generator |
+| | `types_swagger_doc_generated.go` | Swagger-doc generator |
+| **Only when the marker is present** | `zz_generated.prerelease-lifecycle.go` | `prerelease-lifecycle-gen` |
+| **Skip (writes outside `pkg/apis/**`)** | clientset / listers / informers / applyconfigurations | `client-gen` / `lister-gen` / `informer-gen` / `applyconfiguration-gen` |
+| | repository-wide OpenAPI | `openapi-gen` |
+
+A `+k8s:protobuf-gen=package` or `+k8s:defaulter-gen=TypeMeta` marker is not
+decorative: once it is on `doc.go`, the corresponding generator **must** be run.
+Never add the marker and then skip the tool.
+
 ## doc.go markers drive generation
 
 Internal:
@@ -71,10 +93,24 @@ scripts/update-codegen.sh protobuf deepcopy swagger defaults conversions
    Read the target names from the repository's own codegen script; the example
    above is illustrative, not authoritative.
 
-   Do not run client/lister/informer/applyconfiguration or repository-wide
-   OpenAPI targets when that would write outside `pkg/apis/**` unless the user
-   explicitly expands the scope.
+   Skip only client/lister/informer/applyconfiguration and repository-wide
+   OpenAPI (see "What must be generated" above). Run every "always generate"
+   target even when a first pass seems to need none of them.
 3. If there is no repository wrapper, derive commands from the versions of the
    installed generators (`--help`) rather than copying flags from another
    release; gengo CLI arguments vary by version.
 4. Run `gofmt`, focused tests, and the repository's `verify-codegen` command.
+
+## Protobuf generation notes
+
+`go-to-protobuf` walks the whole import graph, not just the target package, so a
+module-mode build has two gotchas:
+
+- The Go module cache is read-only; the tool fails with `permission denied`
+  unless the cache is first made owner-writable
+  (`chmod -R u+w "$(go env GOMODCACHE)/<import-root>/"`).
+- Its clean phase deletes `generated.pb.go` from dependency modules (e.g.
+  `apimachinery`) and does not regenerate them. Restore afterwards:
+  `rm -rf <modcache-dir> && go mod download <module>`.
+
+Prefer the repository's own protobuf target, which usually wraps these steps.

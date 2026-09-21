@@ -2,6 +2,10 @@
 
 ## Scenario A — new Group + first Kind
 
+Every file below is required unless explicitly marked conditional (`# if ...`).
+`defaults.go` is always required — its `SetDefaults_*` body may be empty when no
+field has a default.
+
 Write:
 
 ```
@@ -21,7 +25,7 @@ pkg/apis/<group>/<version>/<kind>_types.go
 pkg/apis/<group>/<version>/<kind>_phase_types.go # if Status.Phase is used
 pkg/apis/<group>/<version>/condition_types.go  # if conditions
 pkg/apis/<group>/<version>/condition_consts.go # if conditions
-pkg/apis/<group>/<version>/defaults.go         # if defaults
+pkg/apis/<group>/<version>/defaults.go         # always; SetDefaults_* may be empty
 
 pkg/apis/<group>/install/install.go + doc.go
 pkg/apis/<group>/install/roundtrip_test.go

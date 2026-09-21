@@ -85,6 +85,10 @@ single `validation.go`; extend the established organization instead.
 
 ## Defaulting shape
 
+`defaults.go` (with `addDefaultingFuncs` and `SetDefaults_*`) is a permanent part
+of the versioned package, even when no field has a default — in that case
+`SetDefaults_*` is simply empty. Do not omit the file.
+
 Default external versioned objects so decoding and conversion enter the hub
 with normalized values:
 

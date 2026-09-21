@@ -150,6 +150,13 @@ vs generated.
 - Run `gofmt` on everything you write; do not hand-align struct tags.
 - Run `go run <skill>/scripts/check-exported-docs.go -- <written .go files>`
   before codegen. Fix every finding in hand-written files.
+- Produce the **complete** file set from `references/file-map.md`. Structural
+  files — `defaults.go`, `condition_types.go` / `condition_consts.go`,
+  `validation/`, `fuzzer/`, `install/roundtrip_test.go`, group-level `OWNERS` —
+  are not optional; omit none of them.
+- Run every "always generate" codegen target (deepcopy, conversion, defaulter,
+  protobuf, swagger-doc) from `references/codegen.md`. Skip only client / lister
+  / informer / applyconfiguration and repository-wide OpenAPI.
 - Emit the codegen commands (or run them if the repo has a script) and remind
   the user to run `verify-codegen` after.
 - Do not expand the task beyond `pkg/apis/**`; report any required integration

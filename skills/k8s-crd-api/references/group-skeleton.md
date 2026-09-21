@@ -164,6 +164,10 @@ repository's existing label namespace.
 
 ## Conditions (`condition_types.go`)
 
+Conditions are **group-local**: each group defines its own `condition_types.go`
+and `condition_consts.go`; do not extract a shared condition package. A
+framework-level condition helper, if one exists, operates on this group's types.
+
 Define the same API shape in both packages, using `core.ConditionStatus`
 internally and `corev1.ConditionStatus` externally. External fields require
 protobuf tags; internal tags follow the neighboring package convention. The
@@ -227,7 +231,7 @@ ConditionType / Reason constants go in `condition_consts.go` (external version).
 Every exported constant gets its own identifier-first comment. Reason comments
 include `(Severity=Error|Warning|Info)` when the reason represents a false
 condition. Add documented `GetConditions()` / `SetConditions()` methods on the
-external root object:
+external root object — these are required, not optional:
 
 ```go
 // GetConditions returns the conditions for this object.
