@@ -1,0 +1,9 @@
+# Codex-specific metadata for this skill. Claude Code ignores this file.
+name: "k8s-apiserver-rest"
+
+interface:
+  display_name: "Kubernetes Apiserver REST Storage"
+  short_description: "Serve API types via native REST storage and generate the client"
+
+policy:
+  allow_implicit_invocation: true
