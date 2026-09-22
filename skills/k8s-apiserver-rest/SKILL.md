@@ -156,6 +156,9 @@ and finish with a summary of written vs generated files.
   `go.mod` and use it (never hardcode a foreign path).
 - Copy the repository's copyright boilerplate (if the repo's Go files carry one)
   from an adjacent `internal/apiserver/registry` file; do not invent a header.
+- Create the group-level `internal/apiserver/registry/<group>/OWNERS` only for a
+  new group and only when sibling groups use one; never create or modify a
+  top-level `internal/apiserver/registry/OWNERS`.
 - Run `gofmt` on everything you write.
 - Produce the **complete** hand-written file set from `references/file-map.md`,
   then run every applicable client codegen target and the repository's

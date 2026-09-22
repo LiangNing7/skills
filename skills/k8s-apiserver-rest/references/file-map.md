@@ -14,6 +14,7 @@ internal/apiserver/registry/<group>/<kind>/storage/doc.go
 internal/apiserver/registry/<group>/<kind>/storage/storage.go  # genericregistry.Store + subresource stores
 internal/apiserver/registry/<group>/rest/doc.go
 internal/apiserver/registry/<group>/rest/storage_<group>.go   # RESTStorageProvider
+internal/apiserver/registry/<group>/OWNERS               # new group only, if sibling groups use one
 ```
 
 Edit the apiserver entry file (the function that assembles `ServerRunOptions`) to
@@ -54,7 +55,8 @@ internal/apiserver/registry/<group>/rest/storage_<group>.go  # edit: add the sto
 
 Do **not** recreate `rest/doc.go` for an existing group. Extend the existing
 `RESTStorageProvider`'s per-version storage map with the new `"<resource>"` and
-`"<resource>/status"` entries instead of writing a new provider.
+`"<resource>/status"` entries instead of writing a new provider. Do not recreate
+the group-level `OWNERS` for an existing group either.
 
 ## Subresource surface (status / scale)
 
