@@ -64,7 +64,11 @@ func Validate<Kind>SpecUpdate(spec, old *<group>.<Kind>Spec, fldPath *field.Path
 
 // Validate<Kind>Status validates a <Kind> status.
 func Validate<Kind>Status(status *<group>.<Kind>Status, fldPath *field.Path) field.ErrorList {
-	return field.ErrorList{}
+	allErrs := field.ErrorList{}
+	// If present, validate Phase against every declared phase value.
+	// Validate ObservedGeneration bounds and each Condition's type, status,
+	// severity contract, and uniqueness by the list-map key.
+	return allErrs
 }
 
 // Validate<Kind>StatusUpdate validates a status update to a <Kind>.
@@ -82,6 +86,20 @@ func Validate<Kind>StatusUpdate(obj, old *<group>.<Kind>) field.ErrorList {
 Adapt pointer/value signatures to the neighboring validation package. Do not
 emit empty placeholder functions when the group centralizes several Kinds in a
 single `validation.go`; extend the established organization instead.
+
+Status fields carry API contracts just like spec fields. When the status type
+declares any of the following, enforce them in `Validate<Kind>Status`:
+
+- typed phase: empty only when documented, otherwise one of the declared values;
+- `ObservedGeneration`: non-negative and, on status update, not greater than
+  the object's current `metadata.generation`;
+- conditions: non-empty and syntactically valid map keys, unique condition
+  types, a valid condition status, and any documented status/severity rule.
+
+`Validate<Kind>StatusUpdate` must call `ValidateObjectMetaUpdate` even when the
+status strategy resets protected metadata. The strategy protects authorization
+boundaries; validation still enforces update metadata invariants and precise
+error paths.
 
 ## Defaulting shape
 
@@ -120,3 +138,7 @@ them.
 For every validation rule, cover the valid boundary and each invalid class with
 the exact field path. For every default, cover both the unset case and the case
 where an explicit user value must be preserved.
+
+For a status-bearing resource, add cases for every phase value class,
+condition-key duplication, invalid condition status/severity, generation
+bounds, and a valid status update carrying normal update metadata.

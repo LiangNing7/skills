@@ -45,7 +45,8 @@ type <Group>ControllerConfiguration struct {
 
 // <Controller>ControllerConfiguration contains the <controller> controller's own knobs.
 type <Controller>ControllerConfiguration struct {
-	// Concurrency is the number of workers for this controller. Must be > 0.
+	// Concurrency is the number of workers for this controller. Zero disables
+	// workers; values must be greater than or equal to zero.
 	// +optional
 	Concurrency int32
 }
@@ -91,7 +92,8 @@ type <Group>ControllerConfiguration struct {
 
 // <Controller>ControllerConfiguration contains the <controller> controller's own knobs.
 type <Controller>ControllerConfiguration struct {
-	// Concurrency is the number of workers for this controller. Must be > 0.
+	// Concurrency is the number of workers for this controller. Zero disables
+	// workers; values must be greater than or equal to zero.
 	// +optional
 	Concurrency *int32 `json:"concurrency,omitempty"`
 }
@@ -263,6 +265,10 @@ func Validate<Controller>ControllerConfiguration(cfg *config.<Controller>Control
 - The controller-manager entry loads the domain config the same way as the
   shared one: versioned → `latest.Default()` (or `scheme.Scheme.Default`) →
   convert to internal → `Validate`.
+- The options/config-loading layer retains the domain block from defaults,
+  replaces it after file decode, validates the assembled config, and copies it
+  into the final `ComponentConfig`; a field present only in the schema is not
+  wired.
 - Each reconciler receives only its nested block, e.g.
   `ComponentConfig: &cfg.<Controller>Controller`. Worker count and sync period
   come from `Generic.Parallelism` / `Generic.SyncPeriod` (or the controller's
@@ -273,3 +279,7 @@ func Validate<Controller>ControllerConfiguration(cfg *config.<Controller>Control
   mirror type, never an import of this tree's types (see `file-map.md`).
 - Building the reconciler that consumes `ComponentConfig` is out of scope
   (k8s-controller).
+
+Test unset defaulting and explicit-zero preservation for optional scalars,
+negative/otherwise invalid values with exact field paths, and the shared
+file-to-options-to-`ComponentConfig` propagation path.

@@ -13,11 +13,12 @@ The typed access layer is generated, never hand-written. It lives under
 | `pkg/generated/listers/...` | `lister-gen` |
 | `pkg/generated/informers/...` | `informer-gen` |
 | `pkg/generated/applyconfigurations/...` | `applyconfiguration-gen` |
-| `pkg/generated/openapi/...` | `openapi-gen` (repository-wide; usually separate) |
+| `pkg/generated/openapi/...` | `openapi-gen` (repository-wide; required when the apiserver publishes compiled-in schemas) |
 
 The API-type codegen (deepcopy / conversion / defaulter / protobuf /
 swagger-doc) is the `k8s-crd-api` skill's concern and should already be done;
-this skill generates only the client-facing layer.
+this skill generates the client-facing layer and, when centrally published by
+the apiserver, the repository-wide OpenAPI package.
 
 ## What to generate
 
@@ -27,8 +28,8 @@ this skill generates only the client-facing layer.
 | | `listers` | `lister-gen` |
 | | `informers` | `informer-gen` |
 | **Generate alongside clientset** | `applyconfigurations` | `applyconfiguration-gen` |
+| **Generate when centrally served** | `openapi` | `openapi-gen` |
 | **Skip** | types-level codegen (already in `pkg/apis`) | — |
-| | repository-wide OpenAPI (unless explicitly asked) | `openapi-gen` |
 
 `client-gen` requires `+genclient` on the type and `+genclient:nonNamespaced`
 for cluster-scoped kinds; these markers live in the versioned types and are
@@ -44,15 +45,23 @@ scripts/update-codegen.sh client lister informer applyconfiguration
 
    Read the target names from the repository's own script; the example above is
    illustrative, not authoritative.
-2. Prefer focused targets that emit `pkg/generated/**` only. Do not re-run the
-   types-level targets (deepcopy / conversion / protobuf) unless the types
-   changed in this task.
+2. Prefer focused targets that emit `pkg/generated/**` only. Include the
+   repository's OpenAPI target when the apiserver exposes generated definitions.
+   Do not re-run types-level targets (deepcopy / conversion / protobuf) unless
+   the types changed in this task.
 3. Confirm the output package root from the script's `OUTPUT_PKG`
    (`<module>/pkg/generated`) and keep generated files under it. Never move or
    hand-edit generated output.
 4. Run `gofmt` on any hand-written file and the repository's `verify-codegen`
    command afterward; it enforces that committed generated output matches a
    fresh run.
+
+Some `verify-codegen` wrappers require a clean worktree. Do not skip
+verification because the implementation is still uncommitted: verify from an
+equivalent clean temporary worktree/synthetic commit, or run it immediately
+after making the intended commit. If neither is possible, rerun the exact
+generation targets and compare generated-file hashes, and disclose that
+fallback.
 
 ## Consumption (for the controller)
 

@@ -15,6 +15,11 @@ Read this reference only when generating or verifying files in Phase 6.
 3. Run focused validation/defaulting tests, then `go test ./pkg/apis/...` when
    the repository can build that package tree independently.
 
+Status validation tests should exercise semantic invariants, not merely call an
+empty validator: cover phase domains, associative-condition key uniqueness,
+condition status/severity rules, observed-generation bounds, and exact field
+paths.
+
 The documentation checker intentionally does not scan the entire repository:
 older API packages may contain known historical violations, while newly written
 declarations must not add more.

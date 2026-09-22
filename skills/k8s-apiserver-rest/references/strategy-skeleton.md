@@ -13,6 +13,7 @@ import (
 	"fmt"
 
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -21,6 +22,7 @@ import (
 	"k8s.io/apiserver/pkg/registry/rest"
 	"k8s.io/apiserver/pkg/storage"
 	"k8s.io/apiserver/pkg/storage/names"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"sigs.k8s.io/structured-merge-diff/v6/fieldpath"
 
 	"<module>/pkg/apis/<group>"
@@ -124,6 +126,7 @@ var StatusStrategy = <kind>StatusStrategy{Strategy}
 func (<kind>StatusStrategy) GetResetFields() map[fieldpath.APIVersion]*fieldpath.Set {
 	return map[fieldpath.APIVersion]*fieldpath.Set{
 		"<group>/<version>": fieldpath.NewSet(
+			fieldpath.MakePathOrDie("metadata"),
 			fieldpath.MakePathOrDie("spec"),
 		),
 	}
@@ -135,8 +138,7 @@ func (<kind>StatusStrategy) PrepareForUpdate(ctx context.Context, obj, old runti
 	oldObj := old.(*<group>.<Kind>)
 
 	newObj.Spec = oldObj.Spec
-	newObj.DeletionTimestamp = nil
-	newObj.OwnerReferences = oldObj.OwnerReferences
+	metav1.ResetObjectMetaForStatus(&newObj.ObjectMeta, &oldObj.ObjectMeta)
 }
 
 // ValidateUpdate validates an update to the status subresource.
@@ -192,10 +194,23 @@ func drop<Kind>DisabledFields(k *<group>.<Kind>, old *<group>.<Kind>) {}
   already uses; do not import a foreign scheme.
 - `NamespaceScoped()` returns `false` for cluster-scoped resources.
 - `GetResetFields` lists the write-protected paths per served version; keep
-  `status` for the main strategy and `spec` for the status strategy.
+  `status` for the main strategy and both `metadata` and `spec` for the status
+  strategy. This keeps server-side apply ownership aligned with the runtime
+  reset behavior.
+- Use `metav1.ResetObjectMetaForStatus` for new status subresources. Preserving
+  only selected metadata fields can let a caller with `update/status` mutate
+  labels, annotations, finalizers, or generation without main-resource update
+  permission.
 - The `drop<Kind>DisabledFields` helper is a no-op when there are no
   feature-gated fields; keep the name and empty body for consistency with the
   surrounding conventions.
 - `DefaultGarbageCollectionPolicy` reflects ownership: `rest.DeleteDependents`
   when the resource owns dependents that should cascade on delete;
   `rest.OrphanDependents` when it owns none (deletion must never cascade).
+
+## Strategy tests
+
+Add a focused test proving that a status update keeps the submitted status but
+cannot change spec or protected metadata (labels, annotations, finalizers,
+owner references, deletion timestamp, and generation). Also test create/main
+update behavior when the resource has non-trivial generation or status rules.

@@ -2,8 +2,8 @@
 name: k8s-controller-config
 description: >-
   Author the controller-manager's component configuration: the shared overall
-  config at internal/controller/apis/config/ and per-domain config trees at
-  internal/controller/<group>/apis/config/ — internal + versioned types,
+  config at internal/controller/apis/config/ and per-domain config trees under
+  internal/controller/ — internal + versioned types,
   register/scheme/latest, defaulting, validation, and the generated
   deepcopy/conversion/defaults files. Component config is a config-file schema,
   not a served resource. Trigger when the user asks to "add controller config",
@@ -82,16 +82,19 @@ The component-config contract, stated once:
 - **Internal ⇄ versioned pair.** The internal type is what the code consumes;
   the versioned type is what the file carries. Every field exists in both, in
   the same shape; only the versioned one carries json tags and pointer-izes
-  optional scalars so "unset" survives defaulting.
+  optional scalars so "unset" survives defaulting. The shared config's local
+  mirror of a domain block follows the same rule; duplication does not permit
+  it to collapse an optional pointer back to a scalar.
 - **Defaulting is registered, not called ad hoc.** `SetDefaults_*` /
   `RecommendedDefault*` functions are registered in the versioned scheme; the
   only entry point is `latest.Default()` (or `scheme.Scheme.Default` on a
   decoded versioned object). Reconcilers and wiring never apply defaults
   themselves.
-- **Validation runs at load.** `Validate(cfg) field.ErrorList` checks every
-  constraint (concurrency ≥ 0, required image set, …); the controller-manager
-  refuses to start on a non-empty list. Config validation never reaches the
-  apiserver.
+- **Validation runs at load and on the assembled config.** `Validate(cfg)
+  field.ErrorList` checks every constraint (concurrency ≥ 0, required image set,
+  …); decoded files are rejected immediately and the final config assembled
+  from flags/options is validated before startup. Config validation never
+  reaches the apiserver.
 - **Generated files are generated.** `zz_generated.deepcopy.go`,
   `zz_generated.conversion.go`, `zz_generated.defaults.go` are produced by the
   repo's codegen script from tags in `doc.go`. Never hand-write or hand-edit
@@ -177,8 +180,9 @@ Read the same skeleton's validation section in this phase.
 Tag `doc.go` (`+k8s:deepcopy-gen=package`, `+groupName=<...>`), run the repo's
 codegen script to produce the `zz_generated.*` files, add `OWNERS`, and wire
 consumption: the controller-manager entry loads the config via
-`latest.Default()` + decode + `Validate`; each reconciler receives only its own
-nested block (`ComponentConfig`).
+`latest.Default()` + decode + `Validate`; its options layer retains every
+domain block, replaces it from a decoded file, and copies it into the final
+`ComponentConfig`. Each reconciler receives only its own nested block.
 
 Read `references/file-map.md` (generated-file list and wiring edits) and the
 skeleton's codegen/consumption section in this phase.
@@ -196,10 +200,16 @@ skeleton's codegen/consumption section in this phase.
 - Never reference another config group's types from a config type, in either
   direction. Mirror domain knobs in a local block type in the shared config;
   embed the generic block in a domain tree — but never both at once.
+- Pointer-ize an optional scalar in every versioned representation, including
+  the shared config's local mirror. Default only `nil`; never replace an
+  explicit `false`, `0`, or empty value when that value is valid.
 - Every exported identifier gets an identifier-first doc comment; every named
   struct field a semantic comment.
 - Every config package root gets an `OWNERS` file.
 - Run `gofmt` on everything you write.
+- Test unset defaulting, preservation of explicit zero values, invalid config
+  rejection, and end-to-end config propagation through the options layer into
+  the final `ComponentConfig`.
 - Do not expand the task into reconciler logic; report reconciler/registration
   work as a follow-up (k8s-controller).
 

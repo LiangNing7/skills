@@ -10,6 +10,7 @@ Write:
 ```
 internal/apiserver/registry/<group>/<kind>/doc.go        # package doc + import comment
 internal/apiserver/registry/<group>/<kind>/strategy.go   # create/update/delete + status strategy, matcher
+internal/apiserver/registry/<group>/<kind>/strategy_test.go # status boundary + generation behavior
 internal/apiserver/registry/<group>/<kind>/storage/doc.go
 internal/apiserver/registry/<group>/<kind>/storage/storage.go  # genericregistry.Store + subresource stores
 internal/apiserver/registry/<group>/rest/doc.go
@@ -40,6 +41,12 @@ import (
 )
 ```
 
+Provider registration does not enable a group-version. Follow the repository's
+resource-config convention and either enable `<group>/<version>` by default or
+document and test the runtime flag that enables it. Add a focused test against
+the effective `APIResourceConfigSource`; otherwise the install loop may skip
+the group before the provider is invoked.
+
 Generated (never hand-written), written under `pkg/generated/`:
 
 ```
@@ -47,7 +54,13 @@ pkg/generated/clientset/...          # client-gen
 pkg/generated/listers/...            # lister-gen
 pkg/generated/informers/...          # informer-gen
 pkg/generated/applyconfigurations/...  # applyconfiguration-gen   (only if clientset is generated)
+pkg/generated/openapi/...              # openapi-gen, when the server publishes compiled-in schemas
 ```
+
+When centralized OpenAPI is present, regenerate it and wire its
+`GetOpenAPIDefinitions` function into the apiserver entry/config. A package-level
+Swagger-doc file does not by itself publish the resource in `/openapi/v2` or
+`/openapi/v3`.
 
 Add a table-printer handler (under `internal/pkg/printers/...`) only when
 `kubectl get` table output is requested; it powers the store's
@@ -60,6 +73,7 @@ Write / edit:
 ```
 internal/apiserver/registry/<group>/<kind>/doc.go            # new
 internal/apiserver/registry/<group>/<kind>/strategy.go       # new
+internal/apiserver/registry/<group>/<kind>/strategy_test.go  # new
 internal/apiserver/registry/<group>/<kind>/storage/doc.go    # new
 internal/apiserver/registry/<group>/<kind>/storage/storage.go # new
 internal/apiserver/registry/<group>/rest/storage_<group>.go  # edit: add the storage block to the version map
@@ -69,6 +83,9 @@ Do **not** recreate `rest/doc.go` for an existing group. Extend the existing
 `RESTStorageProvider`'s per-version storage map with the new `"<resource>"` and
 `"<resource>/status"` entries instead of writing a new provider. Do not recreate
 the group-level `OWNERS` for an existing group either.
+
+If this Kind adds new wire types, regenerate the centralized OpenAPI output when
+the repository has one; do not add a second OpenAPI provider for the group.
 
 ## Subresource surface (status / scale)
 

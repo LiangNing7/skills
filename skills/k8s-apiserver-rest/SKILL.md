@@ -22,8 +22,9 @@ API, backed directly by etcd. This is the **native compiled-in REST storage**
 path — the resource is built into the apiserver binary and served like core
 resources, not registered as a dynamic apiextensions CRD.
 
-Keep all hand-written output within `internal/apiserver/registry/**` plus the
-single wiring edit in the apiserver entry file, and the generated client under
+Keep hand-written storage code within `internal/apiserver/registry/**` plus the
+apiserver entry/scheme wiring edits. Generated clients and, when the server
+publishes schemas for compiled-in APIs, generated OpenAPI stay under
 `pkg/generated/`. Do not create or modify `pkg/apis/**` types, controllers, or
 CRD manifests.
 
@@ -37,12 +38,12 @@ CRD manifests.
 
 ## Model
 
-The native REST storage path has four cooperating layers plus one public output:
+The native REST storage path has four cooperating layers plus generated public outputs:
 
 1. **Strategy** — `strategy.go` beside the resource: the object-typed REST
    semantics. It implements `rest.RESTCreateStrategy` / `RESTUpdateStrategy` /
    `RESTDeleteStrategy` (via embedded `GarbageCollectionDeleteStrategy`), decides
-   namespace scope, cleares/guards fields on create and update, bumps
+   namespace scope, clears/guards fields on create and update, bumps
    `Generation` on spec change, and reuses the validation package. A second
    `StatusStrategy` governs the `/status` subresource.
 2. **Storage** — `storage/storage.go`: wraps `genericregistry.Store` to bind the
@@ -52,13 +53,19 @@ The native REST storage path has four cooperating layers plus one public output:
    `storage.RESTStorageProvider` (`GroupName()` + `NewRESTStorage()`), which
    builds the `APIGroupInfo` and the `map[string]rest.Storage` keyed by
    `"<resource>"`, `"<resource>/status"`, `"<resource>/scale"`.
-4. **Wiring** — one edit in the apiserver entry file passing the provider to
-   `WithRESTStorageProviders(...)`, which feeds the control-plane's
-   `ExternalRESTStorageProviders`.
+4. **Wiring** — register the provider, enable the served group-version in the
+   server's resource config, and connect generated OpenAPI definitions when the
+   server publishes OpenAPI. Provider registration alone is insufficient: a
+   disabled group is skipped before `NewRESTStorage()` runs.
 
 The generated **client** (`pkg/generated/clientset`, `listers`, `informers`,
 `applyconfigurations`) is the typed access layer the controller consumes. It is
 generated, never hand-written.
+
+When the server publishes generated schemas, the generated **OpenAPI** package
+is the discovery/schema layer consumed by `kubectl explain`, schema-aware
+clients, and server-side apply tooling. Swagger-doc generation on the API types
+does not replace this apiserver wiring.
 
 ## Interview rules (grill style)
 
@@ -110,6 +117,8 @@ For each create/update rule, capture only what deviates from the default:
 - fields cleared on create (always: `Status`; ask for any others)
 - fields preserved/cleared on update (always preserve `Status`; bump
   `Generation` when spec changes)
+- status updates preserve the submitted status but reset `spec` and protected
+  metadata to the stored object (`metav1.ResetObjectMetaForStatus` by default)
 - immutability / rejected field changes → `Validate<Kind>Update`
 - validation source: reuse `pkg/apis/<group>/validation` (default) or new rules
 
@@ -136,6 +145,11 @@ Read `references/storage-skeleton.md` in this phase.
 - ensure the group's types are registered in the apiserver scheme
   (`pkg/apis/<group>/install` `init()` + `_ import` in `import_known_versions.go`)
 - confirm the resource-enabled gating (`apiResourceConfigSource.ResourceEnabled`)
+  and ensure the group-version is enabled by the default resource config or by
+  an explicitly documented runtime flag
+- when the apiserver exposes OpenAPI, regenerate the repository's centralized
+  definitions and pass their `GetOpenAPIDefinitions` entry point into the
+  server configuration
 
 Read `references/storage-skeleton.md` (provider section) in this phase.
 
@@ -163,10 +177,11 @@ and finish with a summary of written vs generated files.
   top-level `internal/apiserver/registry/OWNERS`.
 - Run `gofmt` on everything you write.
 - Produce the **complete** hand-written file set from `references/file-map.md`,
-  then run every applicable client codegen target and the repository's
+  then run every applicable client/OpenAPI codegen target and the repository's
   `verify-codegen`. Remind the user to re-run `verify-codegen` after.
-- Do not expand the task beyond REST storage + wiring + client codegen; report
-  any required controller or e2e work as a follow-up instead of implementing it.
+- Do not expand the task beyond REST storage + enablement/OpenAPI wiring +
+  generated access layers; report controller or e2e work as a follow-up instead
+  of implementing it.
 
 ## Progressive loading
 

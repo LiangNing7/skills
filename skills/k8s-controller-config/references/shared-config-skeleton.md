@@ -84,6 +84,11 @@ type <Group>ControllerConfiguration struct {
 }
 ```
 
+The locally mirrored domain block is still a wire type. If a domain scalar
+needs to distinguish unset from an explicit zero value, use a pointer here even
+when the internal mirror uses a scalar. Keep this shape consistent with the
+domain config's versioned type so both loading paths have identical semantics.
+
 ## Register (`register.go`, `v1beta1/register.go`)
 
 Internal — version is `runtime.APIVersionInternal`:
@@ -189,6 +194,10 @@ func RecommendedDefault<Group>ControllerConfiguration(obj *<Group>ControllerConf
 }
 ```
 
+Default pointer-ized scalars only when they are `nil`. Test both the unset case
+and preservation of explicit `false`, `0`, or an empty value whenever that zero
+value is part of the documented contract.
+
 ## Latest (`latest/latest.go`)
 
 ```go
@@ -244,3 +253,10 @@ func Validate<Group>ControllerConfiguration(cfg *config.<Group>ControllerConfigu
   receive only their own nested block via `ComponentConfig`; worker count and
   sync period are read from `Generic.Parallelism` / `Generic.SyncPeriod` (or
   the controller's own `Concurrency`) into the shared controller options.
+- The options layer must retain each mirrored domain block from
+  `latest.Default()`, replace it after file decode, and copy it into the final
+  internal `ComponentConfig`; defining the schema alone does not wire it.
+- Test file decode/default/validation, explicit-zero preservation, rejection of
+  invalid values, and propagation into the final `ComponentConfig`. If a sample
+  config is shipped, load it in a test so enabling validation cannot silently
+  make the documented startup path invalid.

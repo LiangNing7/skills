@@ -116,9 +116,19 @@ type <Kind>Status struct {
 
 	// Conditions defines the current state of the <Kind>.
 	// +optional
-	Conditions Conditions `json:"conditions,omitempty" protobuf:"bytes,2,rep,name=conditions"`
+	// +listType=map
+	// +listMapKey=type
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	Conditions Conditions `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,2,rep,name=conditions"`
 }
 ```
+
+When Conditions is a map-list keyed by `type`, the marker comments and struct
+tags are one contract: keep both `+patchStrategy` / `+patchMergeKey` and the
+matching `patchStrategy` / `patchMergeKey` tags. `openapi-gen` rejects a field
+whose comment markers and struct tags disagree, and strategic merge patch needs
+the struct tags at runtime.
 
 ## Finalizer constant (top of `<kind>_types.go`)
 
@@ -243,6 +253,8 @@ const (
    numbers unique, stable, increasing from 1 within a struct; `opt` = optional,
    `rep` = repeated; `name=` matches the json name; `casttype=` for type aliases;
    use `varint` for integer/bool scalars and `bytes` for strings/messages.
+   For associative lists, keep patch marker comments and the corresponding
+   `patchStrategy` / `patchMergeKey` struct tags byte-for-byte consistent.
 5. Fixed phrases — do not rewrite:
    - `Standard object's metadata.`
    - `Standard list metadata.`

@@ -38,6 +38,13 @@ Edit the wiring:
 - the controller-manager entry (`cmd/<...>-controller-manager/` or its app
   package) — load the config: flags/config-file → decode versioned →
   `latest.Default()` → `Validate` → completed config consumed by the manager.
+- the options/config-loading layer — retain every domain block from defaults,
+  replace it when a config file is decoded, copy it into the final internal
+  `ComponentConfig`, and validate the final flag/options-assembled config.
+
+Add focused tests proving that unset optional scalars receive defaults,
+explicit zero values survive decode/default/convert, invalid values prevent
+startup, and each domain block reaches the final `ComponentConfig`.
 
 Bootstrap happens once per project; afterwards the shared tree is only
 **extended** (new domain block), never recreated.
@@ -83,6 +90,12 @@ Edit the wiring:
   (versioned → default → convert → validate) and pass each controller's nested
   block to its reconciler. Reconciler construction itself is out of scope
   (k8s-controller).
+- the shared options/config-loading path — retain the locally mirrored block
+  across defaults, file loading, and final `ComponentConfig` assembly.
+
+The shared mirror's versioned optional scalars use pointers exactly as the
+domain version does. Test both trees for unset defaults and explicit zero-value
+preservation, then test the shared file-to-runtime path.
 
 ## Scenario C — extend an existing domain tree
 
@@ -99,6 +112,9 @@ Then re-run codegen so `zz_generated.deepcopy.go` /
 `zz_generated.conversion.go` pick up the new fields. Do **not** recreate the
 tree; do not add a second versioned package (bump only when the config's wire
 compatibility actually breaks).
+
+Extend the existing defaulting, validation, decode, and options-propagation
+tests for every newly added knob.
 
 ## Shared vs domain config
 
