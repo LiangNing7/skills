@@ -51,6 +51,15 @@ type <Controller>ControllerConfiguration struct {
 }
 ```
 
+**When to embed the generic block.** Only when this domain's config file must
+carry generic settings — the domain runs as its own component and loads its
+own config file. In a single-binary repo (one controller-manager loading one
+overall config), omit `Generic` entirely: generic settings come from the
+shared config, and the domain tree stays pure domain knobs. The two
+directions are mutually exclusive — a domain tree importing the generic block
+and the shared config referencing the domain's types together form an import
+cycle.
+
 ## Versioned type (`v1beta1/types.go`)
 
 Mirrors the internal type with json tags; use pointers for fields whose
@@ -260,6 +269,7 @@ func Validate<Controller>ControllerConfiguration(cfg *config.<Controller>Control
   own `Concurrency`) into the shared controller options.
 - After this tree exists, add the domain's top-level block to the shared config
   (`internal/controller/apis/config/types.go` + `v1beta1/types.go` +
-  `v1beta1/defaults.go`) so the overall config file can carry it.
+  `v1beta1/defaults.go`) so the overall config file can carry it — as a local
+  mirror type, never an import of this tree's types (see `file-map.md`).
 - Building the reconciler that consumes `ComponentConfig` is out of scope
   (k8s-controller).

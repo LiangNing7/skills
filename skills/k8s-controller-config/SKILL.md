@@ -60,11 +60,25 @@ apiserver registry, reconciler logic, or tests under `test/e2e/`.
 
 The component-config contract, stated once:
 
-- **Two levels, no duplication.** Cross-cutting knobs (leader election,
+- **Two levels, decoupled types.** Cross-cutting knobs (leader election,
   parallelism, sync period, watch filter, infra clients) live in the shared
-  config and in the shared generic package it embeds — never re-declared per
-  domain. A domain config embeds/reuses the generic block; it adds only
-  domain-specific fields.
+  config — never re-declared per domain. A domain config carries only
+  domain-specific fields. The two levels never import each other's Go types:
+  conversion generators cannot convert a nested field whose type belongs to
+  another config group (they emit a compile-error stub, and manual delegate
+  functions only make the generator skip the pair), so when the overall
+  config file must carry a domain's knobs, the shared config declares a small
+  **local block type mirroring the domain's fields** — a deliberate
+  duplication that is the price of the generator limitation.
+- **Embed the generic block only for standalone loading.** A domain tree
+  embeds the shared generic block only when the domain's own config file must
+  carry generic settings (the domain runs as its own component and loads its
+  own config). In a single-binary repo — one controller-manager loading one
+  overall config — the domain tree carries domain knobs only and generic
+  settings come from the shared config. Embedding the generic block and
+  letting the shared config reference the domain's types are mutually
+  exclusive: each direction is an import on its own, both together are an
+  import cycle.
 - **Internal ⇄ versioned pair.** The internal type is what the code consumes;
   the versioned type is what the file carries. Every field exists in both, in
   the same shape; only the versioned one carries json tags and pointer-izes
@@ -101,8 +115,8 @@ The component-config contract, stated once:
 - **Bootstrap** — `internal/controller/apis/config/` does not exist: write the
   shared tree (and nothing else; domains come later).
 - **New domain** — shared tree exists, `internal/controller/<group>/apis/config/`
-  does not: write the domain tree, and add the domain's top-level block to the
-  shared config.
+  does not: write the domain tree, and add the domain's top-level block (a
+  locally declared mirror type) to the shared config.
 - **Extend** — the domain tree exists: add fields to the internal type, the
   versioned type, the defaulting function, and the validator, in place. Never
   recreate the tree.
@@ -127,10 +141,10 @@ Read `references/file-map.md` in this phase.
 
 ### Phase 2 — Types
 
-Write the internal `types.go` (no json tags; embed the generic block; nested
-per-controller blocks) and the mirrored `v1beta1/types.go` (json tags,
-pointers for optional scalars, `+optional` comments). Every field exists at
-both levels.
+Write the internal `types.go` (no json tags; embed the generic block only if
+the domain loads a standalone config file — see Model; nested per-controller
+blocks) and the mirrored `v1beta1/types.go` (json tags, pointers for optional
+scalars, `+optional` comments). Every field exists at both levels.
 
 Read `references/shared-config-skeleton.md` (bootstrap) or
 `references/group-config-skeleton.md` (domain) in this phase.
@@ -178,7 +192,10 @@ skeleton's codegen/consumption section in this phase.
   script run is impossible in the environment, leave them missing and say so —
   do not hand-write them.
 - Reuse the shared generic block from `pkg/config/**`; a domain config embeds
-  it, never re-declares its fields.
+  it only for standalone loading, never re-declares its fields.
+- Never reference another config group's types from a config type, in either
+  direction. Mirror domain knobs in a local block type in the shared config;
+  embed the generic block in a domain tree — but never both at once.
 - Every exported identifier gets an identifier-first doc comment; every named
   struct field a semantic comment.
 - Every config package root gets an `OWNERS` file.

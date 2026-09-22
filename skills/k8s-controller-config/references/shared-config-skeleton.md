@@ -43,8 +43,11 @@ type <Group>ControllerConfiguration struct {
 ```
 
 The generic block and infra client blocks come from `pkg/config` — embed, do
-not re-declare. Each business domain contributes one top-level block; the block
-type may live here (small) or reference the domain's own config types.
+not re-declare. Each business domain contributes one top-level block, declared
+**locally** as a small type mirroring the domain's fields. Never type such a
+field as the domain tree's own config type: conversion generators cannot
+convert a nested field across config groups (they emit a compile-error stub),
+so the shared config and a domain tree must not import each other.
 
 ## Versioned type (`v1beta1/types.go`)
 

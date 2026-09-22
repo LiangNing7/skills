@@ -75,8 +75,10 @@ internal/controller/<group>/apis/config/v1beta1/zz_generated.conversion.go
 Edit the wiring:
 
 - `internal/controller/apis/config/types.go` (+ `v1beta1/types.go`,
-  `v1beta1/defaults.go`) — add the domain's top-level block so the overall
-  config can carry it.
+  `v1beta1/defaults.go`, `validation/validation.go`) — add the domain's
+  top-level block as a **locally declared mirror type** with the domain's
+  fields. Never type the field as the domain tree's own config types:
+  conversion generators cannot convert nested fields across config groups.
 - the controller-manager entry — load the domain config the same way
   (versioned → default → convert → validate) and pass each controller's nested
   block to its reconciler. Reconciler construction itself is out of scope
@@ -105,5 +107,8 @@ compatibility actually breaks).
 | shared | `internal/controller/apis/config/` | leader election, bind addresses, parallelism, sync period, watch filter, infra clients, one top-level block per domain |
 | domain | `internal/controller/<group>/apis/config/` | the domain's own knobs + one nested block per controller in the domain |
 
-The domain config embeds the shared generic block (`pkg/config/**`); it never
-duplicates cross-cutting knobs.
+The two levels never import each other's types. A domain tree embeds the
+generic block (`pkg/config/**` or wherever the repo keeps it) only when the
+domain loads a standalone config file; in a single-binary repo it carries
+domain knobs only. When the overall config file must carry the domain's
+knobs, the shared config declares a local mirror of the domain's block.
