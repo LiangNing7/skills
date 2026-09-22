@@ -196,5 +196,6 @@ func drop<Kind>DisabledFields(k *<group>.<Kind>, old *<group>.<Kind>) {}
 - The `drop<Kind>DisabledFields` helper is a no-op when there are no
   feature-gated fields; keep the name and empty body for consistency with the
   surrounding conventions.
-- `DefaultGarbageCollectionPolicy` returns `rest.OrphanDependents` only when the
-  resource has dependents that must be orphaned instead of cascaded.
+- `DefaultGarbageCollectionPolicy` reflects ownership: `rest.DeleteDependents`
+  when the resource owns dependents that should cascade on delete;
+  `rest.OrphanDependents` when it owns none (deletion must never cascade).
