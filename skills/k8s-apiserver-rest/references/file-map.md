@@ -28,6 +28,18 @@ opts, err := ...,
 	),
 ```
 
+Register the group's types into the apiserver's process-wide scheme so the
+storage layer can encode/decode them: ensure `pkg/apis/<group>/install` registers
+into the scheme via `init()` (see the `k8s-crd-api` skill), and `_ import` that
+install package from the apiserver's `import_known_versions.go`:
+
+```go
+// import_known_versions.go
+import (
+	_ "<module>/pkg/apis/<group>/install"
+)
+```
+
 Generated (never hand-written), written under `pkg/generated/`:
 
 ```

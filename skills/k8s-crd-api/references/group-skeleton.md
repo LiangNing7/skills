@@ -127,10 +127,15 @@ package install
 import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
 
 	"<module>/pkg/apis/<group>"
 	<group><version> "<module>/pkg/apis/<group>/<version>"
 )
+
+func init() {
+	Install(legacyscheme.Scheme)
+}
 
 // Install registers the API group and adds its types to the scheme.
 func Install(scheme *runtime.Scheme) {
@@ -140,9 +145,11 @@ func Install(scheme *runtime.Scheme) {
 }
 ```
 
-The `init()` wiring depends on the project's global scheme; adapt to how the
-project exposes it (e.g. a legacy scheme or an apiserver scheme), and keep the
-`Install(scheme)` function the single entry point.
+For a Kubernetes-apiserver-based control plane, `init()` registers the group into
+the process-wide `legacyscheme.Scheme`, which the apiserver's storage layer reads;
+the apiserver must also `_ import` this install package (typically from its
+`import_known_versions.go`). For a different global scheme, adapt the `init()`
+target accordingly and keep `Install(scheme)` the single entry point.
 
 ## OWNERS (`pkg/apis/<group>/OWNERS`)
 

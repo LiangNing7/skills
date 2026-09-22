@@ -133,6 +133,8 @@ Read `references/storage-skeleton.md` in this phase.
   `NewRESTStorage()` building the `APIGroupInfo` and per-version storage map)
 - edit the apiserver entry file to append
   `<group>rest.RESTStorageProvider{}` to `WithRESTStorageProviders(...)`
+- ensure the group's types are registered in the apiserver scheme
+  (`pkg/apis/<group>/install` `init()` + `_ import` in `import_known_versions.go`)
 - confirm the resource-enabled gating (`apiResourceConfigSource.ResourceEnabled`)
 
 Read `references/storage-skeleton.md` (provider section) in this phase.
