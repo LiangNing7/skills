@@ -117,6 +117,9 @@ Adapt the builder API to the controller-runtime version in `go.mod`.
 - Do not `Owns(child)` and also watch the same child with the same owner mapping;
   it creates duplicate enqueue paths without adding correctness.
 - A map function returns zero or more primary keys and performs no writes.
+- A map function cannot return an error: log lookup failures instead of
+  returning nil silently — a dropped mapping means the primary never
+  re-reconciles and a waiting resource can stall forever with no signal.
 - Filter secondary events on fields the secondary resource actually carries.
   A global primary label/pause predicate can accidentally discard every child
   event.
