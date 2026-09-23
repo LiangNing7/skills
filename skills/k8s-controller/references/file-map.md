@@ -12,8 +12,9 @@ internal/controller/<domain>/<controller>/controller_test.go
 <controller-manager registration or setup file>
 ```
 
-The controller-manager edits may be a direct `setupReconcilers` call, a
-`ControllerDescriptor`/`AddFunc`, or a wrapper alias. Follow the repository.
+The controller-manager edits may use a direct setup function, a descriptor
+registry with add callbacks, or an exported wrapper layer. Follow the target
+repository.
 
 ## Conditional controller files
 

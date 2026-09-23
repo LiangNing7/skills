@@ -2,7 +2,7 @@
 name: k8s-controller
 description: >-
   Design and implement controller-runtime reconciliation for an already-served
-  Kubernetes-style API in an Onex-derived controller manager. Trigger when the
+  Kubernetes-style API in a controller-runtime manager. Trigger when the
   user asks to write or rewrite controller logic, reconcile a Kind, add watches
   or finalization, manage owned resources, update status and conditions, or
   register a reconciler. Covers reconcile-contract selection, watches and
@@ -11,17 +11,18 @@ description: >-
   component-config schema authoring, or end-to-end tests.
 ---
 
-# Onex-style Kubernetes Controller Engineering
+# Kubernetes Controller Engineering
 
 Implement a control loop for an API that is already served and has a generated
 client. The result is not merely a compiling `Reconcile` method: repeated calls
 must converge safely under duplicate events, stale cache reads, optimistic
 conflicts, process crashes, partial external success, and deletion.
 
-This skill owns controller logic under `internal/controller/**`, its focused
-tests, watches/indexes, and controller-manager registration. Component config
-belongs to `k8s-controller-config`; API types and validation belong to
-`k8s-crd-api`; serving/client generation belongs to `k8s-apiserver-rest`.
+This skill owns the target repository's controller package (commonly
+`internal/controller/**`), its focused tests, watches/indexes, and
+controller-manager registration. Component config belongs to
+`k8s-controller-config`; API types and validation belong to `k8s-crd-api`;
+serving/client generation belongs to `k8s-apiserver-rest`.
 
 ## Design model
 
@@ -38,7 +39,7 @@ matches the source of truth and side effects:
 
 Read `references/controller-patterns.md` before choosing. Do not add phases,
 finalizers, patch helpers, polling, `APIReader`, or server-side apply merely
-because another Onex controller uses them.
+because another controller uses them.
 
 All patterns share these invariants:
 
@@ -61,17 +62,17 @@ Inspect the target repository and record:
 1. the served API type, validation/defaulting, status/condition contract, and
    status subresource;
 2. controller-runtime and Kubernetes dependency versions;
-3. controller-manager style: direct `setupReconcilers`, descriptor registry,
-   wrapper aliases, or native `manager.Runnable`;
+3. controller-manager style: direct setup, descriptor registry, exported
+   wrapper layer, or native `manager.Runnable`;
 4. existing helpers for patching, conditions, predicates, SSA, events,
    rate-limiting, and result aggregation;
 5. cache exclusions and field indexes already installed;
 6. the existing component-config block, if the controller consumes one.
 
-Preserve the repository's actual conventions. Do not copy an Onex helper call
-until its local implementation and ownership semantics have been read.
+Preserve the repository's actual conventions. Do not copy a helper call until
+its local implementation and ownership semantics have been read.
 
-Read `references/onex-conventions.md` during this inspection.
+Read `references/repository-conventions.md` during this inspection.
 
 ## Workflow
 
@@ -117,7 +118,7 @@ Use per-input predicates when primary and secondary resources have different
 metadata. A global `WithEventFilter` applies to every watched source and can
 silently block child events.
 
-Read `references/onex-conventions.md` for setup and registration examples.
+Read `references/repository-conventions.md` for setup and registration examples.
 
 ### Phase 4 — Implement convergence
 
@@ -191,10 +192,10 @@ Read only the reference needed for the current phase:
 
 | Phase | Read |
 |---|---|
-| repository inspection | `references/onex-conventions.md` |
+| repository inspection | `references/repository-conventions.md` |
 | reconcile contract | `references/reconcile-contract.md` |
 | pattern selection | `references/controller-patterns.md` |
-| watches/setup/registration | `references/onex-conventions.md` |
+| watches/setup/registration | `references/repository-conventions.md` |
 | implementation/status/finalizers | `references/reconcile-contract.md` |
 | files and tests | `references/file-map.md`, `references/testing.md` |
 

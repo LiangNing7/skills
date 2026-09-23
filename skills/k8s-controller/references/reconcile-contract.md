@@ -35,18 +35,20 @@ is still waiting for a dependency or an asynchronous operation.
 | deletion cleanup incomplete | Deleting/progress condition | watch/requeue until absence confirmed |
 
 Use an explicit `complete`/`fullyObserved` boolean when observed generation is
-patched by a defer. Never derive it from `err == nil`.
+persisted. Never derive it from `err == nil`.
 
 ## Top-level loop
 
-This is a shape, not a mandatory byte-level template. Omit the finalizer and
-patch helper when the selected controller pattern does not need them.
+This is a shape, not a mandatory byte-level template. Omit the finalizer when
+the selected controller pattern does not need one. The example uses only
+controller-runtime client primitives; substitute a repository helper only when
+its contract is understood and equivalent.
 
 ```go
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req ctrl.Request,
-) (result ctrl.Result, retErr error) {
+) (ctrl.Result, error) {
 	obj := &apiv1.<Kind>{}
 	if err := r.client.Get(ctx, req.NamespacedName, obj); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -63,7 +65,7 @@ func (r *Reconciler) Reconcile(
 		"generation", obj.GetGeneration(),
 	))
 
-	if annotations.IsPaused(obj) {
+	if r.isPaused(obj) { // only when pause is part of this API's contract
 		return ctrl.Result{}, nil
 	}
 
@@ -85,37 +87,47 @@ func (r *Reconciler) Reconcile(
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	helper, err := patch.NewHelper(obj, r.client) // only when this helper exists and fits
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	fullyObserved := false
-	defer func() {
-		r.summarizeStatus(obj)
-		opts := []patch.Option{patch.WithOwnedConditions{
-			Conditions: r.ownedConditions(),
-		}}
-		if fullyObserved {
-			opts = append(opts, patch.WithStatusObservedGeneration{})
-		}
-		if err := helper.Patch(ctx, obj, opts...); err != nil {
-			retErr = kerrors.NewAggregate([]error{retErr, err})
-		}
-	}()
-
 	if !obj.GetDeletionTimestamp().IsZero() {
 		return r.reconcileDelete(ctx, obj)
 	}
 
-	result, fullyObserved, retErr = r.reconcileNormal(ctx, obj)
-	return result, retErr
+	statusBase := obj.DeepCopy()
+	result, fullyObserved, reconcileErr := r.reconcileNormal(ctx, obj)
+	r.summarizeStatus(obj)
+	if fullyObserved {
+		obj.Status.ObservedGeneration = obj.Generation
+	}
+
+	patchErr := r.patchStatus(ctx, statusBase, obj)
+	return result, kerrors.NewAggregate([]error{reconcileErr, patchErr})
+}
+
+func (r *Reconciler) patchStatus(
+	ctx context.Context,
+	before, after *apiv1.<Kind>,
+) error {
+	if apiequality.Semantic.DeepEqual(before.Status, after.Status) {
+		return nil
+	}
+	return r.client.Status().Patch(
+		ctx,
+		after,
+		client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}),
+	)
 }
 ```
 
-If the repository has no suitable patch helper, explicitly snapshot before
-mutation and separately patch metadata/spec and status with optimistic locking.
-Do not issue an unconditional full-object `Update` after a cached read.
+Patch metadata/spec separately from status. Do not issue an unconditional
+full-object `Update` after a cached read. When multiple controllers own
+different condition types, the simple status patch above must be replaced by a
+conflict-retry merge that preserves unowned conditions; use a repository helper
+only when it provides that ownership contract.
+
+`reconcileDelete` owns its status/finalizer persistence because deletion may
+need a different patch order and may make the object disappear. A normal-path
+`reconcileNormal` returns `fullyObserved=false` whenever a required read or
+action is incomplete; a stable, fully evaluated user-facing failure may return
+`fullyObserved=true` while setting a failure condition.
 
 ## Normal convergence
 

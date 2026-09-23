@@ -1,22 +1,20 @@
-# Onex-derived controller conventions
+# Repository controller conventions
 
-Read this reference while inspecting the repository and wiring watches or
-registration. Onex-derived repositories do not all use the same manager shape;
-the code in the target repository is authoritative.
+Read this reference while inspecting the target repository and wiring watches
+or registration. Controller-runtime repositories do not all use the same
+manager shape; the target code is authoritative.
 
 ## First classify the manager
 
 Look for one of these registration styles before adding files:
 
-1. **Dedicated manager** — a binary has `setupReconcilers` and constructs every
-   reconciler directly. Inject dependencies and the existing component-config
-   block in that function.
-2. **Shared controller-manager** — canonical names feed a
-   `ControllerDescriptor`/`AddFunc` registry with enablement, aliases, feature
-   gates, and shared options. Add a descriptor; do not bypass the registry.
-3. **Wrapper/alias layer** — exported wrappers under `internal/controller`
-   expose otherwise internal reconcilers to a batteries-included manager.
-   Preserve that boundary when the target uses it.
+1. **Direct setup** — a binary constructs every reconciler in a setup function
+   and injects dependencies and component config directly.
+2. **Descriptor registry** — canonical names feed registry entries carrying an
+   add function, enablement, aliases, feature gates, and shared options. Add a
+   descriptor; do not bypass the registry.
+3. **Exported wrapper layer** — public wrappers expose internal reconcilers to a
+   composed manager. Preserve that package boundary when the target uses it.
 4. **Runnable/native controller** — special controllers may be added with
    `mgr.Add` instead of controller-runtime builder wiring. Use only when the
    controller does not fit keyed reconciliation.
@@ -55,10 +53,11 @@ type Reconciler struct {
 	// Set only when a documented freshness or cache-exclusion requirement exists.
 	APIReader client.Reader
 
+	// Optional: only when this controller consumes an existing config block.
 	ComponentConfig *config.<Controller>ControllerConfiguration
-	WatchFilterValue string
-	recorder         record.EventRecorder
-	clock            clock.Clock
+
+	recorder record.EventRecorder
+	clock    clock.Clock
 
 	// External systems and complex collaborators should be interfaces.
 	external ExternalClient
@@ -88,10 +87,10 @@ func (r *Reconciler) SetupWithManager(
 	r.client = mgr.GetClient()
 	r.recorder = mgr.GetEventRecorderFor(controllerName)
 
-	primaryPredicates := []predicate.Predicate{
-		predicates.ResourceNotPaused(ctrl.LoggerFrom(ctx)),
-		predicates.ResourceHasFilterLabel(ctrl.LoggerFrom(ctx), r.WatchFilterValue),
-	}
+	// Define these from this controller's contract. They are not global defaults.
+	primaryPredicates := r.primaryPredicates(ctx)
+	childPredicates := r.childPredicates(ctx)
+	secretPredicates := r.secretPredicates(ctx)
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(controllerName).
@@ -132,18 +131,18 @@ resources. Index registration belongs before manager start and uses the exact
 field read by the map/list path.
 
 ```go
-const secretNameIndex = "spec.provider.apiKeySecret.name"
+const secretNameIndex = "spec.secretRef.name"
 
 if err := mgr.GetFieldIndexer().IndexField(
 	ctx,
 	&apiv1.<Kind>{},
 	secretNameIndex,
 	func(obj client.Object) []string {
-		workload := obj.(*apiv1.<Kind>)
-		if workload.Spec.Provider.APIKeySecret.Name == "" {
+		resource := obj.(*apiv1.<Kind>)
+		if resource.Spec.SecretRef.Name == "" {
 			return nil
 		}
-		return []string{workload.Spec.Provider.APIKeySecret.Name}
+		return []string{resource.Spec.SecretRef.Name}
 	},
 ); err != nil {
 	return err
@@ -174,7 +173,7 @@ plus aggregate rate limiting.
 - scheme contains the primary and every watched/written type;
 - required field indexes are installed before controllers start;
 - event recorder component uses the canonical controller name;
-- canonical name/aliases and descriptor entry are present when that registry is
+- canonical name/aliases and registry entry are present when that mechanism is
   used;
 - component config reaches the reconciler without being dropped;
 - feature-gate and disabled-by-default behavior follows neighboring entries;
@@ -183,9 +182,8 @@ plus aggregate rate limiting.
 
 ## Repository helpers
 
-Onex repositories often carry `conditions`, `patch`, `predicates`, `ssa`, and
-result-combination helpers derived from Cluster API. Read their implementation
-before use:
+Mature controller repositories often carry `conditions`, `patch`, `predicates`,
+`ssa`, and result-combination helpers. Read their implementation before use:
 
 - Does the patch helper patch metadata/spec and status separately?
 - Does it retry condition conflicts and support owned conditions?
@@ -195,4 +193,4 @@ before use:
 - Does a predicate apply to all builder inputs or one input only?
 
 Use the helper when its contract matches. Otherwise prefer a small explicit
-patch over cargo-culting a complex wrapper.
+patch over copying a complex wrapper whose invariants are unclear.
