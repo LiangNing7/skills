@@ -1,183 +1,201 @@
 ---
 name: k8s-controller
 description: >-
-  Write a controller that reconciles an already-served API resource: define the
-  controller's own component config (internal/controller/<group>/apis/config/),
-  then implement the controller-runtime reconciler (Reconciler struct,
-  SetupWithManager, Reconcile loop, status/conditions/phase updates, and
-  registration) so spec changes converge to observed status. Trigger when the
-  user asks to "write a controller", "reconcile <Kind>", "add the controller
-  logic", or wire a reconciler into the controller-manager. Covers component
-  config, the reconcile loop, status/conditions, and registration. Do not use for
-  defining the API types (k8s-crd-api), for apiserver REST storage / client
-  codegen (k8s-apiserver-rest), or for e2e tests (k8s-e2e).
+  Design and implement controller-runtime reconciliation for an already-served
+  Kubernetes-style API in an Onex-derived controller manager. Trigger when the
+  user asks to write or rewrite controller logic, reconcile a Kind, add watches
+  or finalization, manage owned resources, update status and conditions, or
+  register a reconciler. Covers reconcile-contract selection, watches and
+  indexes, idempotent convergence, finalizers, status ownership, registration,
+  and controller tests. Do not use for API type definitions, apiserver storage,
+  component-config schema authoring, or end-to-end tests.
 ---
 
-# Kubernetes Controller Authoring
+# Onex-style Kubernetes Controller Engineering
 
-Implement the reconciliation logic that turns desired spec into observed status
-for an already-served resource. A controller is the component that watches a
-resource, compares what should exist against what does, and converges the two by
-creating/updating owned resources and writing status.
+Implement a control loop for an API that is already served and has a generated
+client. The result is not merely a compiling `Reconcile` method: repeated calls
+must converge safely under duplicate events, stale cache reads, optimistic
+conflicts, process crashes, partial external success, and deletion.
 
-Two cooperating halves, both under `internal/controller/`:
+This skill owns controller logic under `internal/controller/**`, its focused
+tests, watches/indexes, and controller-manager registration. Component config
+belongs to `k8s-controller-config`; API types and validation belong to
+`k8s-crd-api`; serving/client generation belongs to `k8s-apiserver-rest`.
 
-1. **Component config** — the controller-manager binary's own configuration
-   (`internal/controller/<group>/apis/config/`), following the versioned
-   internal/external + defaulting + validation convention. It is a config-file
-   schema, **not** a served resource.
-2. **Reconciler** — the controller-runtime `Reconciler` (struct +
-   `SetupWithManager` + `Reconcile`) that reacts to events and drives
-   status/conditions to convergence.
+## Design model
 
-The reconciler runs on controller-runtime, which wraps the underlying native
-machinery (shared informers, a rate-limited workqueue, and a reconcile loop).
-The native mechanics — informer → enqueue → rate-limited queue → reconcile —
-are the invariants the reconciler expresses; the skill states them explicitly
-so the reconciler is written against the model, not the framework's accidents.
+There is no universal controller skeleton. Select the smallest pattern that
+matches the source of truth and side effects:
 
-Keep all output within `internal/controller/**` plus the controller-manager
-registration edit. Do not modify `pkg/apis/**`, the apiserver registry, or tests
-under `test/e2e/`.
+- observer/status controller;
+- owned-resource controller;
+- aggregate/scaler controller;
+- scheduled controller;
+- external-system lifecycle controller;
+- projection/sink controller;
+- cross-cluster or uncached-dependency controller.
 
-## When to use
+Read `references/controller-patterns.md` before choosing. Do not add phases,
+finalizers, patch helpers, polling, `APIReader`, or server-side apply merely
+because another Onex controller uses them.
 
-- "Write a controller for `<Kind>`" / "reconcile `<Kind>`".
-- "Add the controller logic" after the resource is served and the client is
-  generated (both from `k8s-apiserver-rest`).
-- "Wire a reconciler into the controller-manager" / "register a controller".
+All patterns share these invariants:
 
-## Model
+- Reconciliation is **level-based**. A request contains a key, not the event
+  that caused it; always re-read current state and derive the next action.
+- Every write is idempotent. A retry after any successful write must be safe.
+- Cache reads are the default; uncached reads are explicit correctness choices.
+- Status reports observation and progress. API defaulting owns defaults; spec
+  changes are allowed only when the API contract explicitly defines
+  controller-owned late initialization or normalization.
+- Finalizers protect real cleanup only. They are persisted before the side
+  effect they protect and removed only after absence/cleanup is confirmed.
+- `status.observedGeneration` advances only after the controller has completely
+  evaluated that generation, not merely because the call returned no error.
 
-The reconcile contract, stated once:
+## Before implementation
 
-- **Read cached, write through clients.** Reads go through the manager's cached
-  client (or listers); writes go through typed clients, never by mutating the
-  informer cache object in place (`DeepCopy()` first).
-- **Not-found is done.** Deletion is observed as absence; `IsNotFound` / the
-  equivalent is a no-op, not an error to retry.
-- **Retry only transient errors, with backoff.** Returning an error requeues the
-  object through a rate limiter; permanent/user errors are recorded (events +
-  conditions) and return `nil`.
-- **One keyed queue.** Every event (add/update/delete, primary or owned) funnels
-  into a single queue keyed by the reconciled object's namespace/name.
-- **Converge in status.** All observable progress is persisted through a
-  conflict-safe status/conditions path, never into spec.
+Inspect the target repository and record:
 
-controller-runtime maps these to `Reconcile(ctx, req)` returning
-`(ctrl.Result, error)`, with `For`/`Owns`/`Watches` declaring which events
-enqueue the primary object.
+1. the served API type, validation/defaulting, status/condition contract, and
+   status subresource;
+2. controller-runtime and Kubernetes dependency versions;
+3. controller-manager style: direct `setupReconcilers`, descriptor registry,
+   wrapper aliases, or native `manager.Runnable`;
+4. existing helpers for patching, conditions, predicates, SSA, events,
+   rate-limiting, and result aggregation;
+5. cache exclusions and field indexes already installed;
+6. the existing component-config block, if the controller consumes one.
 
-## Interview rules (grill style)
+Preserve the repository's actual conventions. Do not copy an Onex helper call
+until its local implementation and ownership semantics have been read.
 
-1. Ask **one question at a time**; state each question's purpose and offer a
-   default so the user can accept with a single keystroke.
-2. Keep a **facts ledger**; check the ledger and repo (`internal/controller/**`,
-   `pkg/apis/<group>/**`) before asking.
-3. **Fast path.** If the user states what the controller watches, what it
-   creates/validates, and the terminal condition/phase, do not re-ask — write,
-   then confirm once.
-4. **Phase order is fixed.** Advance only after the user confirms the phase
-   summary.
-5. Match the user's language for prose; keep code identifiers in English.
-
-## Classify the request
-
-- **New controller** — no `internal/controller/<group>/` tree yet: write the
-  component config AND the reconciler, and register it.
-- **New reconciler / new logic** — the group config already exists; add or
-  extend one reconciler's `Reconcile` phases and its registration.
-
-Ask a single disambiguating question only when it is genuinely ambiguous.
+Read `references/onex-conventions.md` during this inspection.
 
 ## Workflow
 
-### Phase 1 — Reconcile contract
+### Phase 1 — State the reconcile contract
 
-Collect, one at a time, skipping what is known:
+Write a short facts ledger covering:
 
-1. the reconciled `<Kind>` + group (already served)
-2. what the controller does on each reconcile (validate spec, check a
-   referenced secret, create/update owned resources, mark status)
-3. owned resources it creates/manages (for `Owns`) and any secondary watches
-4. event filter: paused-annotation gate and/or a watch-filter label value
-5. whether it uses a finalizer (deletion needs cleanup) — default no for a
-   read-only reconciler
-6. the terminal condition/phase and the failure conditions to surface
+- primary resource and scope;
+- desired state and authoritative observed state;
+- owned, adopted, referenced, external, and cross-cluster resources;
+- event sources and key-mapping rules;
+- deletion/cleanup obligations;
+- conditions, phase, references, and observed-generation semantics;
+- expected waiting states, transient failures, and terminal failures.
 
-### Phase 2 — Component config
+If these facts are already in types, tests, or the request, do not ask again.
+Ask one question only when a missing fact changes the controller's safety or
+ownership model.
 
-Only for a new controller group. Define the group config's fields (nested
-per-controller blocks, feature gates, and the shared generic block), defaults,
-and validation. Reuse the shared generic config; add only domain-specific
-fields.
+Read `references/reconcile-contract.md` for the decision table.
 
-Read `references/config-skeleton.md` in this phase.
+### Phase 2 — Select the controller pattern
 
-### Phase 3 — Reconciler struct + setup
+Choose one primary pattern from `references/controller-patterns.md`. Compose a
+second pattern only when the resource genuinely has both behaviors—for example,
+an owned-resource controller that also polls an external API.
 
-Write the `Reconciler` struct (client, optional uncached `APIReader`,
-`ComponentConfig`, `WatchFilterValue`, collaborators) and `SetupWithManager`
-(`For` / `Owns` / `Watches` + `WithOptions` + `Named`).
+State why the chosen pattern needs each of: finalizer, periodic requeue,
+secondary watch, uncached reader, SSA, or multi-phase reconcile. Omit any item
+without a concrete need.
 
-Read `references/reconciler-skeleton.md` in this phase.
+### Phase 3 — Design watches, indexes, and dependencies
 
-### Phase 4 — Reconcile logic
+Define `For`, `Owns`, and `Watches` from the contract:
 
-Write the `Reconcile` skeleton: fetch + not-found no-op → pause gate →
-patch-helper snapshot + deferred patch → finalizer guard (if any) → deletion vs
-normal path → phase sub-reconcilers → aggregate errors and requeue hint.
+- `For` identifies the one primary resource;
+- `Owns` maps controller-owned children through owner references;
+- `Watches` handles referenced, adopted, external-event, or cross-cluster
+  resources through an explicit map function;
+- indexes replace full-list scans for reverse lookups.
 
-Read `references/reconciler-skeleton.md` in this phase.
+Use per-input predicates when primary and secondary resources have different
+metadata. A global `WithEventFilter` applies to every watched source and can
+silently block child events.
 
-### Phase 5 — Status & conditions
+Read `references/onex-conventions.md` for setup and registration examples.
 
-Write the condition constants the controller owns, the `MarkTrue`/`MarkFalse`/
-`MarkUnknown` calls, the `SetSummary` for `Ready`, the phase derivation, and the
-`observedGeneration` write.
+### Phase 4 — Implement convergence
 
-Read `references/reconciler-skeleton.md` (status section) in this phase.
+Implement fetch → gates → finalizer persistence (if needed) → deletion or
+normal convergence → status persistence. Business logic should compute from
+current state and use stable identities or persisted references.
 
-### Phase 6 — Registration
+Use the repository patch helper only after checking its behavior for metadata,
+spec, status, condition conflicts, and deletion. If it supports owned
+conditions, declare exactly the condition types this controller owns.
 
-Add the canonical name constant, register the reconciler in the manager's
-setup/descriptor wiring, and source worker count + sync period from config.
+Read `references/reconcile-contract.md` before writing the loop.
 
-Read `references/reconciler-skeleton.md` (registration section) and
-`references/file-map.md` in this phase.
+### Phase 5 — Status, conditions, and errors
 
-## Rules
+Classify every non-success outcome:
 
-- Write only hand-written files. Never hand-write generated client/lister/
-  informer code; import from `pkg/generated/**` (produced by
-  `k8s-apiserver-rest`).
-- Every exported identifier gets an identifier-first doc comment; every named
-  struct field a semantic comment.
-- Follow the repository's existing controller naming: package name = controller
-  short name, a package-level `controllerName` constant in
-  `"controller-manager.<name>"` form, and a `names/` package holding canonical
-  name constants.
-- Reuse the repository's `internal/pkg/util/{conditions,patch,predicates,
-  annotations}` helpers rather than reimplementing condition merge or diff
-  patching.
-- Never mutate a cached object in place; `DeepCopy()` before writes.
-- Run `gofmt` on everything you write.
-- Do not expand the task beyond controller config + logic + registration; report
-  any apiserver or e2e work as a follow-up.
+- transient failure → return an error for rate-limited retry;
+- expected waiting/drift polling → set a progress condition and use a watch or
+  `RequeueAfter`, without error backoff;
+- optimistic conflict → follow the repository convention, normally a clean
+  immediate retry or the returned conflict error;
+- terminal/user state → persist a condition/event and stop hot-looping;
+- not found primary → normally successful completion; a projection/sink
+  controller may first reconcile absence by key.
+
+Derive summary conditions and phase from detailed observations. Persist failure
+conditions even when the business operation returns an error. Mark the current
+generation observed only when the complete contract was evaluated.
+
+### Phase 6 — Register and test
+
+Register through the manager's existing mechanism, preserving canonical names,
+aliases, feature gates, shared `controller.Options`, scheme registration,
+indexes, and injected collaborators. Add or extend component config only by
+using `k8s-controller-config`.
+
+Read `references/file-map.md` and `references/testing.md`. Implement the
+behavioral matrix appropriate to the selected pattern, run focused tests, then
+the repository-wide relevant test target.
+
+## Hard rules
+
+- Never infer correctness from an event payload; requests may be deduplicated,
+  delayed, or caused by an unrelated watched object.
+- Never mutate spec to emulate API defaulting. A spec write requires an explicit
+  API contract for controller-owned late initialization/normalization and a
+  conflict-safe update path; otherwise users own spec.
+- Never create an externally visible resource before the finalizer or other
+  leak-prevention marker protecting it is durably persisted.
+- Never remove a finalizer immediately after requesting asynchronous deletion;
+  first observe that cleanup completed or the resource is absent.
+- Never set observed generation solely on `err == nil`; waiting and partial
+  progress may also return nil.
+- Never let two controllers overwrite each other's conditions. Declare and
+  patch owned condition types.
+- Never combine `Owns` and an equivalent `Watches` for the same relationship
+  unless the second mapping intentionally covers a distinct ownership case.
+- Never use `APIReader` as a blanket workaround for cache behavior. Document
+  the freshness requirement or cache exclusion that needs it.
+- Never use `GenerateName` for retryable creation unless the created identity is
+  recoverable deterministically or persisted before another create can occur.
+- Never assume a fake client proves cache, watch, status-subresource, SSA, or
+  optimistic-conflict behavior; use envtest or a targeted integration test.
+- Do not recreate component config, generated clients, API types, or apiserver
+  storage in this skill.
 
 ## Progressive loading
 
-1. Only the `description` above is always present; it is the trigger.
-2. When triggered, this SKILL.md loads; it carries the workflow.
-3. Read a reference only when the current phase needs it, then stop.
+Read only the reference needed for the current phase:
 
-| Phase | Read (on demand) |
+| Phase | Read |
 |---|---|
-| 1 — Reconcile contract | nothing |
-| 2 — Component config | `references/config-skeleton.md` |
-| 3 — Reconciler struct + setup | `references/reconciler-skeleton.md` |
-| 4 — Reconcile logic | `references/reconciler-skeleton.md` |
-| 5 — Status & conditions | `references/reconciler-skeleton.md` (status section) |
-| 6 — Registration | `references/reconciler-skeleton.md` (registration section), `references/file-map.md` |
+| repository inspection | `references/onex-conventions.md` |
+| reconcile contract | `references/reconcile-contract.md` |
+| pattern selection | `references/controller-patterns.md` |
+| watches/setup/registration | `references/onex-conventions.md` |
+| implementation/status/finalizers | `references/reconcile-contract.md` |
+| files and tests | `references/file-map.md`, `references/testing.md` |
 
-Do not pre-load all references.
+Do not load every reference up front.

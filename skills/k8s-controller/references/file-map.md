@@ -1,70 +1,100 @@
-# File map per scenario
+# Controller file map
 
-## Scenario A — new controller group (config + first reconciler)
+The selected pattern determines the files. Keep simple controllers compact;
+split complex state machines by responsibility.
 
-Write:
+## Always inspect or edit
 
-```
-internal/controller/<group>/<controller>/doc.go                    # package doc: what it reconciles + owns
-internal/controller/<group>/<controller>/controller.go             # Reconciler + SetupWithManager + Reconcile
-internal/controller/<group>/<controller>/<controller>_phases.go    # one file per reconcile phase (if several)
-internal/controller/<group>/<controller>/<controller>_status_condition_utils.go  # condition consts + condition updater
-internal/controller/<group>/<controller>/<controller>_test.go      # unit tests
-
-internal/controller/<group>/apis/config/doc.go
-internal/controller/<group>/apis/config/types.go                   # internal config type (no json tags)
-internal/controller/<group>/apis/config/register.go                # internal SchemeGroupVersion + AddToScheme
-internal/controller/<group>/apis/config/scheme/scheme.go           # runtime scheme for Default() + Convert()
-internal/controller/<group>/apis/config/latest/latest.go           # latest.Default() -> internal with defaults
-internal/controller/<group>/apis/config/validation/validation.go   # Validate(cfg) field.ErrorList
-internal/controller/<group>/apis/config/v1beta1/doc.go
-internal/controller/<group>/apis/config/v1beta1/types.go           # external config type (json tags)
-internal/controller/<group>/apis/config/v1beta1/defaults.go        # SetDefaults_<Config> + RecommendedDefault*
-internal/controller/<group>/apis/config/v1beta1/register.go        # external GroupName/Version + addDefaultingFuncs
+```text
+internal/controller/<domain>/<controller>/controller.go
+internal/controller/<domain>/<controller>/controller_test.go
+<controller-manager canonical names file>
+<controller-manager registration or setup file>
 ```
 
-Generated (never hand-written) alongside the config package:
+The controller-manager edits may be a direct `setupReconcilers` call, a
+`ControllerDescriptor`/`AddFunc`, or a wrapper alias. Follow the repository.
 
-```
-internal/controller/<group>/apis/config/zz_generated.deepcopy.go
-internal/controller/<group>/apis/config/v1beta1/zz_generated.deepcopy.go
-internal/controller/<group>/apis/config/v1beta1/zz_generated.defaults.go
-internal/controller/<group>/apis/config/v1beta1/zz_generated.conversion.go
-```
+## Conditional controller files
 
-Edit the registration wiring:
-
-- `internal/controller/names/...` (or the repo's canonical-names package) — add the
-  controller name constant.
-- the controller-manager entry that runs `setupReconcilers` / the descriptor map —
-  add a block building this reconciler with its `ComponentConfig` and registering
-  it.
-
-The **shared** config (`internal/controller/apis/config/`) already exists and is
-reused, not recreated.
-
-## Scenario B — new reconciler / new logic in an existing group
-
-Write / edit:
-
-```
-internal/controller/<group>/<controller>/doc.go            # new
-internal/controller/<group>/<controller>/controller.go     # new
-internal/controller/<group>/<controller>/<controller>_*.go # new, per phase
-internal/controller/<group>/<controller>/<controller>_test.go  # new
-internal/controller/names/...                              # edit: add name constant
-<controller-manager entry>                                  # edit: register the reconciler
+```text
+internal/controller/<domain>/<controller>/doc.go       # when neighboring packages use package docs
+internal/controller/<domain>/<controller>/mapping.go   # secondary-watch map funcs and index keys
+internal/controller/<domain>/<controller>/status.go    # substantial condition/phase derivation
+internal/controller/<domain>/<controller>/delete.go    # substantial finalization state machine
+internal/controller/<domain>/<controller>/reconcile.go # substantial normal convergence
+internal/controller/<domain>/<controller>/plan.go      # aggregate/scaler desired-vs-current plan
+internal/controller/<domain>/<controller>/external.go  # external provider adapter/lifecycle helpers
 ```
 
-Do **not** recreate the group's `apis/config/` tree unless new config fields are
-required; extend `types.go`/`v1beta1/types.go`/`defaults.go` in place instead.
+Do not create every conditional file by default.
 
-## Shared vs group config
+## Pattern additions
 
-| Config | Path | Purpose |
-|---|---|---|
-| shared | `internal/controller/apis/config/` | leader election, bind addresses, parallelism, sync period, watch filter, `Controllers` list |
-| group | `internal/controller/<group>/apis/config/` | group-specific flags + nested per-controller blocks |
+### Observer/status
 
-The group config embeds/reuses the shared generic block; it never duplicates the
-cross-cutting knobs.
+- referenced-object field index registration;
+- secondary map-function tests;
+- status/condition tests.
+
+No finalizer or deletion file unless the observer owns real cleanup.
+
+### Owned-resource
+
+- child desired-object builder or reconcile helper;
+- child ownership/drift tests;
+- `Owns` registration and RBAC writes.
+
+### Aggregate/scaler
+
+- plan/diff file and table tests;
+- indexes/expectations bookkeeping;
+- adoption/release and deterministic scale-selection tests.
+
+### Scheduled
+
+- schedule calculation helper and injected clock;
+- schedule boundary/concurrency/history tests.
+
+### External lifecycle
+
+- provider interface/adapter;
+- finalization and create-leak-safety tests;
+- periodic poll and timeout configuration consumption.
+
+### Projection/sink
+
+- sink interface and stable projection key;
+- upsert/delete or tombstone/sweeper implementation;
+- retry, deduplication, and deletion-guarantee tests.
+
+### Cross-cluster
+
+- remote cluster/client dependency wiring;
+- remote source watch and map function;
+- freshness/reconnect tests.
+
+## Existing component config
+
+Consume an existing per-controller config block in the reconciler and
+registration. If a genuinely new knob is required, invoke
+`k8s-controller-config` to extend:
+
+```text
+internal/controller/<domain>/apis/config/types.go
+internal/controller/<domain>/apis/config/v1beta1/types.go
+internal/controller/<domain>/apis/config/v1beta1/defaults.go
+internal/controller/<domain>/apis/config/validation/validation.go
+```
+
+Do not recreate or redesign the config tree from this skill.
+
+## Never hand-write here
+
+- `pkg/generated/clientset`, listers, informers, or apply configurations;
+- `zz_generated.*` config/API files;
+- served API types and validation;
+- apiserver REST storage;
+- e2e suites outside the controller's focused test package.
+
+Report missing prerequisites and route them to the appropriate skill.
