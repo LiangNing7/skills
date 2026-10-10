@@ -1,0 +1,4 @@
+interface:
+  display_name: "整理原始资料"
+  short_description: "直接阅读指定资料，生成带原文定位的摘要与知识页面，维护来源与导航；提取版按需生成。"
+  default_prompt: "请使用 $knowledge-ingest 直接阅读指定资料，整理知识并为关键结论链接原文位置。"

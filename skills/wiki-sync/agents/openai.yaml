@@ -1,0 +1,4 @@
+interface:
+  display_name: "同步正式知识索引"
+  short_description: "将正式 Wiki 及其引用附件单向同步到 OpenViking，记录来源版本，排除草稿和自动记忆写入。"
+  default_prompt: "请使用 $wiki-sync 按已确认的知识工作流完成这项任务。"

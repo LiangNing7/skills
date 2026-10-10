@@ -1,0 +1,4 @@
+interface:
+  display_name: "保存知识与提案"
+  short_description: "仅按明确保存要求沉淀指定内容，区分有依据的知识、用户观点和未确认采用的设计草稿。"
+  default_prompt: "请使用 $wiki-capture 按已确认的知识工作流完成这项任务。"

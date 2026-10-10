@@ -1,0 +1,4 @@
+interface:
+  display_name: "知识库健康巡检"
+  short_description: "只读检查结构与来源，并审查跨页矛盾、证据时效、知识缺口及引用相关性。"
+  default_prompt: "请使用 $wiki-lint 巡检指定知识库范围，报告结构问题与有来源依据的语义问题。"

@@ -1,0 +1,4 @@
+interface:
+  display_name: "确认并合并知识草稿"
+  short_description: "将用户明确采用且授权保存的提案合并入正式 Wiki，保留依据、修订理由并同步检索副本。"
+  default_prompt: "请使用 $wiki-publish 按已确认的知识工作流完成这项任务。"

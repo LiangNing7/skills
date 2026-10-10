@@ -1,0 +1,4 @@
+interface:
+  display_name: "查阅知识与经验"
+  short_description: "定向召回知识库与 Memory，沿关键结论的来源链接回查原件，核对依据与本地版本。"
+  default_prompt: "请使用 $knowledge-recall 查阅相关知识与经验，并沿来源链接核对关键原文。"
