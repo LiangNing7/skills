@@ -15,9 +15,10 @@ Look for one of these registration styles before adding files:
    descriptor; do not bypass the registry.
 3. **Exported wrapper layer** — public wrappers expose internal reconcilers to a
    composed manager. Preserve that package boundary when the target uses it.
-4. **Runnable/native controller** — special controllers may be added with
-   `mgr.Add` instead of controller-runtime builder wiring. Use only when the
-   controller does not fit keyed reconciliation.
+4. **Runnable/native controller** — full-set or shared-destination controllers
+   may use `mgr.Add` instead of keyed builder wiring. Preserve their snapshot,
+   serialization, trigger, shutdown, and leader-election contracts; do not force
+   one reconciler per source object.
 
 Canonical controller names are stable IDs used by flags, metrics, logs, and
 service accounts. Follow the repository's naming and alias policy; never rename
@@ -109,6 +110,10 @@ func (r *Reconciler) SetupWithManager(
 Adapt the builder API to the controller-runtime version in `go.mod`.
 
 ### Watch rules
+
+These builder rules apply to keyed controllers. Full-set loops need explicit
+source invalidation, periodic repair, snapshot completeness, and serialization
+for shared outputs rather than a mandatory `For` resource.
 
 - `For` is called once for the primary resource.
 - `Owns` is for children with a controller owner reference to the primary.

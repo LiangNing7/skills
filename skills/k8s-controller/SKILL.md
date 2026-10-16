@@ -37,6 +37,12 @@ matches the source of truth and side effects:
 - projection/sink controller;
 - cross-cluster or uncached-dependency controller.
 
+These are reading entry points, not mutually exclusive kinds. Select by behavior,
+not a Kind name such as Set or Group. Record the reconciliation unit (object key,
+shared destination key, or full set), identity constraints, direct or delegated
+side effects, access domain, and time model. Cross-cluster access and scheduling
+can qualify another primary responsibility.
+
 Read `references/controller-patterns.md` before choosing. Do not add phases,
 finalizers, patch helpers, polling, `APIReader`, or server-side apply merely
 because another controller uses them.
@@ -50,10 +56,13 @@ All patterns share these invariants:
 - Status reports observation and progress. API defaulting owns defaults; spec
   changes are allowed only when the API contract explicitly defines
   controller-owned late initialization or normalization.
-- Finalizers protect real cleanup only. They are persisted before the side
-  effect they protect and removed only after absence/cleanup is confirmed.
-- `status.observedGeneration` advances only after the controller has completely
-  evaluated that generation, not merely because the call returned no error.
+- Finalizers protect a concrete obligation before an object may disappear,
+  including cleanup or durable completion accounting. Persist the protection
+  before the operation that needs it; remove it only when the documented
+  obligation is satisfied.
+- `status.observedGeneration` follows the API's observation/processing contract.
+  It does not imply readiness or convergence; neither nil error nor partial
+  progress alone determines whether it advances.
 
 ## Before implementation
 
@@ -80,13 +89,15 @@ Read `references/repository-conventions.md` during this inspection.
 
 Write a short facts ledger covering:
 
-- primary resource and scope;
+- primary resource and scope, reconciliation unit, and shared-write conflict domain;
 - desired state and authoritative observed state;
 - owned, adopted, referenced, external, and cross-cluster resources;
 - event sources and key-mapping rules;
-- deletion/cleanup obligations;
+- deletion/accounting obligations and their completion guarantee (confirmed
+  absence, accepted deletion, or explicit preservation);
 - conditions, phase, references, and observed-generation semantics;
-- expected waiting states, transient failures, and terminal failures.
+- expected waiting states, transient failures, terminal failures, and recovery
+  when an external mutation may have succeeded but its result is unknown.
 
 If these facts are already in types, tests, or the request, do not ask again.
 Ask one question only when a missing fact changes the controller's safety or
@@ -96,8 +107,10 @@ Read `references/reconcile-contract.md` for the decision table.
 
 ### Phase 2 — Select the controller pattern
 
-Choose one primary pattern from `references/controller-patterns.md`. Compose a
-second pattern only when the resource genuinely has both behaviors—for example,
+Choose a primary responsibility from `references/controller-patterns.md` and
+record applicable access/time qualifiers. For aggregate controllers, distinguish
+count maintenance, rollout, stateful identity, and batch completion. Compose
+additional behavior only when it actually exists—for example,
 an owned-resource controller that also polls an external API.
 
 State why the chosen pattern needs each of: finalizer, periodic requeue,
@@ -106,7 +119,7 @@ without a concrete need.
 
 ### Phase 3 — Design watches, indexes, and dependencies
 
-Define `For`, `Owns`, and `Watches` from the contract:
+For keyed builder controllers, define `For`, `Owns`, and `Watches` from the contract:
 
 - `For` identifies the one primary resource;
 - `Owns` maps controller-owned children through owner references;
@@ -118,12 +131,17 @@ Use per-input predicates when primary and secondary resources have different
 metadata. A global `WithEventFilter` applies to every watched source and can
 silently block child events.
 
+For a full-set or shared-destination loop, define snapshot completeness,
+serialization, ownership filtering, and triggers instead of forcing one `For`
+per source object. Preserve native Runnable wiring when that fits the contract.
+
 Read `references/repository-conventions.md` for setup and registration examples.
 
 ### Phase 4 — Implement convergence
 
-Implement fetch → gates → finalizer persistence (if needed) → deletion or
-normal convergence → status persistence. Business logic should compute from
+For keyed loops, implement fetch → gates → finalizer persistence (if needed) →
+deletion or normal convergence → status persistence. For full-set loops, use the
+snapshot → plan → owned apply → next-trigger contract. Business logic should compute from
 current state and use stable identities or persisted references.
 
 Use the repository patch helper only after checking its behavior for metadata,
@@ -146,8 +164,9 @@ Classify every non-success outcome:
   controller may first reconcile absence by key.
 
 Derive summary conditions and phase from detailed observations. Persist failure
-conditions even when the business operation returns an error. Mark the current
-generation observed only when the complete contract was evaluated.
+conditions even when the business operation returns an error. Advance observed
+generation according to the API contract, independently of Ready or action completion. An unknown external mutation outcome needs an
+identity-recovery or stop condition before another create is attempted.
 
 ### Phase 6 — Register and test
 
@@ -169,10 +188,11 @@ the repository-wide relevant test target.
   conflict-safe update path; otherwise users own spec.
 - Never create an externally visible resource before the finalizer or other
   leak-prevention marker protecting it is durably persisted.
-- Never remove a finalizer immediately after requesting asynchronous deletion;
-  first observe that cleanup completed or the resource is absent.
-- Never set observed generation solely on `err == nil`; waiting and partial
-  progress may also return nil.
+- Never treat an accepted asynchronous delete as confirmed absence. Retain the
+  finalizer until its promised cleanup/accounting guarantee is satisfied; an
+  accepted-delete or orphan policy must be explicit in the API contract.
+- Never infer readiness from observed generation or `err == nil`. Preserve the
+  API's version-observation semantics during waiting and partial progress.
 - Never let two controllers overwrite each other's conditions. Declare and
   patch owned condition types.
 - Never combine `Owns` and an equivalent `Watches` for the same relationship
@@ -197,6 +217,7 @@ Read only the reference needed for the current phase:
 | pattern selection | `references/controller-patterns.md` |
 | watches/setup/registration | `references/repository-conventions.md` |
 | implementation/status/finalizers | `references/reconcile-contract.md` |
+| fixed-version source examples | `references/upstream-examples.md` |
 | files and tests | `references/file-map.md`, `references/testing.md` |
 
 Do not load every reference up front.

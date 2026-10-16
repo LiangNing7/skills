@@ -38,7 +38,8 @@ Do not create every conditional file by default.
 - secondary map-function tests;
 - status/condition tests.
 
-No finalizer or deletion file unless the observer owns real cleanup.
+No finalizer or deletion file unless the observer owns a concrete pre-deletion
+obligation.
 
 ### Owned-resource
 
@@ -65,9 +66,9 @@ No finalizer or deletion file unless the observer owns real cleanup.
 
 ### Projection/sink
 
-- sink interface and stable projection key;
+- sink interface and stable projection key, or complete snapshot/plan boundary;
 - upsert/delete or tombstone/sweeper implementation;
-- retry, deduplication, and deletion-guarantee tests.
+- retry, deduplication, ownership/policy, and deletion-guarantee tests.
 
 ### Cross-cluster
 

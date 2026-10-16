@@ -15,7 +15,19 @@ decision aids, not templates to combine wholesale.
 | Project Kubernetes state into a database, index, or event sink? | Projection/sink |
 | Read/write another cluster or cache-excluded object? | Cross-cluster/uncached dependency |
 
-Start with one. Compose only the behaviors that actually exist.
+These categories are engineering entry points, not an official or exclusive
+taxonomy. Choose by responsibility, not a Set/Group suffix. Record these
+orthogonal dimensions alongside the primary pattern:
+
+- reconciliation unit and conflict domain: object key, shared output key, full set;
+- identity: interchangeable replicas, ordinal/storage identity, external ID;
+- effects: direct management or delegated lifecycle orchestration;
+- access: local cache, uncached dependency, remote cluster, external API;
+- triggers: reliable events, wall-clock scheduling, drift polling.
+
+A small/bounded child set alone does not make a controller simple: rollout,
+identity, completion, and shared-write constraints decide the needed machinery.
+Start with one primary responsibility and add only applicable qualifiers.
 
 ## 1. Observer/status controller
 
@@ -24,7 +36,7 @@ checking a referenced Secret and reporting Ready.
 
 Characteristics:
 
-- no finalizer when it owns no cleanup;
+- no finalizer when it owns no pre-deletion obligation;
 - primary `For` plus watches on referenced types;
 - reverse-reference field index and map function;
 - cached reads are normally sufficient;
@@ -44,7 +56,7 @@ Characteristics:
 - stable child names or deterministic discovery by owner/index;
 - owner reference and ownership validation;
 - create-or-patch/SSA of controller-owned fields;
-- finalizer only for cleanup not handled by garbage collection;
+- finalizer only for a pre-deletion obligation not handled by garbage collection;
 - Ready summarizes child existence/readiness.
 
 Reconcile desired objects from scratch each time. Do not treat a child update
@@ -55,19 +67,31 @@ event as an instruction; it only triggers re-observation.
 Use for ReplicaSet/MachineSet-style variable child sets, rollout, adoption, or
 ordered scale operations.
 
-Additional requirements:
+Choose the applicable subtype before designing a generic diff:
 
-- indexed list by owner/selector;
-- explicit adoption/release rules and UID checks;
-- deterministic diff: current, desired, create set, update set, delete set;
-- bounded mutations per reconcile when fan-out can overload the API;
-- expectations or equivalent accounting when cache lag can cause duplicate
-  creates/deletes;
-- stable ordering for victim selection and rollout decisions;
-- status computed from the entire observed set.
+| Subtype | Example | Defining invariant |
+|---|---|---|
+| Count maintenance | ReplicaSet | observe active set and close cardinality gap |
+| Rollout | Deployment | version replacement respects availability and surge budgets |
+| Stateful identity | StatefulSet | ordinal, storage, revision, and ordered/parallel policy |
+| Batch/completion | Job | finite completion/failure with durable result accounting |
 
-This pattern deserves dedicated plan/diff unit tests. A generic serial phase
-loop is insufficient.
+Select the mechanisms the subtype actually needs:
+
+- indexed listing by owner/selector and whole-set status;
+- adoption/release only when supported, with fresh ownership/UID checks;
+- a deterministic plan constrained by availability, identity, or completion policy;
+- bounded writes and slow-start where fan-out could overload the API;
+- expectations or equivalent accounting across cache lag, with failure rollback,
+  observation, expiry, and restart semantics;
+- stable victim selection or ordinal ordering when the policy requires it;
+- durable terminal identities/counters and child tracking finalizers for
+  completion accounting when object disappearance could lose results.
+
+A count controller need not update each child, a rollout controller should not
+bypass its child controllers, and a stateful controller cannot treat a
+terminating identity as a freely replaceable replica. Use focused plan/policy
+tests; a generic serial phase loop is insufficient.
 
 ## 4. Scheduled controller
 
@@ -95,16 +119,22 @@ Kubernetes watch graph.
 
 Characteristics:
 
-- finalizer before create/update side effects;
+- finalizer or equivalent durable protection before the side effects it protects;
 - observe-first create/update/delete decision;
-- deterministic external ID or persisted create-pending/idempotency marker;
+- stable external ID or provider idempotency token; if using create-pending
+  markers, define unknown-outcome detection and recovery before retrying create;
+- a visibility grace period when successful creates may temporarily observe absent;
 - provider-call timeouts and injected interface;
 - periodic drift polling while Ready;
 - explicit management/deletion policy when orphaning is supported;
-- asynchronous delete confirmation before finalizer removal;
+- asynchronous delete confirmation when the contract promises absence; explicit
+  preservation or accepted-delete policy otherwise;
 - connection details/credentials written through a separately owned path.
 
-Treat “provider accepted request” as progress, not convergence. Persist status
+A delegated lifecycle controller instead coordinates provider-owned Kubernetes
+objects and their status; do not force a direct provider SDK protocol onto it.
+
+Treat “provider accepted request” as progress, not confirmed convergence. Persist status
 and poll until observation confirms the target state.
 
 ## 6. Projection/sink controller
@@ -112,7 +142,14 @@ and poll until observation confirms the target state.
 Use when Kubernetes is authoritative and a database, search index, cache, or
 event stream is a derived projection.
 
-Characteristics:
+Choose keyed projection or full-set planning. For a shared/full-set output,
+read complete source and destination snapshots, normalize and diff them, apply
+ownership filters and sync/upsert-only/create-only policy, then execute the
+plan. A source error or incomplete snapshot must not become destructive absence.
+Define conflicts between sources, partial apply recovery, and periodic repair.
+A native loop can fit better than one `For` per source object.
+
+For keyed projection:
 
 - idempotent upsert keyed by namespace/name and, when identity matters, UID;
 - primary object fetch followed by projection of the latest complete state;
@@ -158,6 +195,10 @@ machine and state which subsystem owns each condition, write, retry, and
 finalizer.
 
 ## Evidence behind these patterns
+
+For fixed-version implementation examples and their transfer limits, read
+[upstream-examples.md](upstream-examples.md). These are source-reading aids, not
+production templates or claims that upstream code satisfies every rule here.
 
 The design deliberately combines several upstream styles:
 

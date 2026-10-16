@@ -63,11 +63,11 @@ Select applicable cases; do not create irrelevant boilerplate.
 | transient failure | failure condition/event plus retryable error |
 | terminal user state | durable condition, no rate-limited hot loop |
 | deletion requested | cleanup requested once/idempotently |
-| deletion still pending | finalizer retained |
-| deletion confirmed | only owned finalizer removed |
+| deletion obligation pending | finalizer retained until the promised guarantee is met |
+| deletion obligation satisfied | only owned finalizer removed |
 | status conflict | re-get/merge or safe retry; other conditions preserved |
-| partial progress | observed generation not advanced |
-| fully evaluated generation | observed generation equals metadata generation |
+| partial progress | progress/readiness and generation acknowledgement follow distinct API contracts |
+| generation acknowledged | observed generation matches the API-defined observation/processing boundary |
 | secondary event | map function enqueues the correct primary key(s) |
 | second identical reconcile | no additional side effect/write |
 
@@ -75,11 +75,19 @@ Select applicable cases; do not create irrelevant boilerplate.
 
 ### Aggregate/scaler
 
-- cache lag after create/delete does not exceed desired cardinality;
+- cache lag suppresses redundant operations within the documented accounting
+  guarantee; expiry/restart and strict-cardinality limits are explicit;
+- failed/skipped writes roll back expectations; observed events fulfill them;
 - adoption rejects mismatched UID/controller ownership;
 - scale-up/down selection is deterministic;
 - partial mutation resumes from observed state;
-- large sets respect per-reconcile bounds.
+- large sets respect per-reconcile bounds;
+- rollout: unavailable new children do not allow unsafe old-version scale-down;
+  simultaneous scaling, rollback, and another revision respect budgets;
+- stateful: terminating ordinal, PVC identity/retention, partition, and ordered
+  versus parallel policy preserve the API's identity guarantees;
+- batch: terminal identities are persisted before tracking finalizer removal;
+  retries after either write fail neither lose nor double-count completion.
 
 ### Scheduled
 
@@ -87,24 +95,33 @@ Select applicable cases; do not create irrelevant boilerplate.
 - missed runs and starting deadline;
 - suspend and each concurrency policy;
 - duplicate reconcile for one scheduled timestamp creates one child;
-- next `RequeueAfter` is positive and correct.
+- next `RequeueAfter` is positive and correct;
+- create succeeds but parent status persistence fails: AlreadyExists recovery
+  verifies ownership and restores the scheduled run reference.
 
 ### External lifecycle
 
 - observe-existing avoids create;
 - create-pending marker persists before non-deterministic create;
 - crash/retry after provider success cannot leak a second resource;
-- accepted asynchronous delete retains finalizer;
-- not-found confirmation removes finalizer;
+- accepted asynchronous delete retains finalizer when confirmed absence is promised;
+- not-found confirmation removes finalizer after other owned obligations finish;
 - provider timeout/error is retryable and status is preserved;
-- Ready state still polls for drift.
+- Ready state still polls for drift;
+- unknown create result recovers identity or stops blind recreation;
+- successful create followed by temporary absent observation honors the
+  visibility window;
+- observe-only, late-initialize, preserve/orphan, and accepted-delete policies
+  execute only allowed actions and satisfy their declared finalizer obligation.
 
 ### Cross-cluster
 
 - remote watch maps to the local primary;
 - unavailable credentials/cluster become a stable condition;
 - stale cache does not violate the documented freshness contract;
-- reconnect/poll path eventually resumes convergence.
+- reconnect/poll path eventually resumes convergence;
+- partial manifest success retries safely; cluster identity, ownership,
+  unavailable-cluster and cluster-exit deletion policies stay distinct.
 
 ### Projection/sink
 
@@ -113,7 +130,10 @@ Select applicable cases; do not create irrelevant boilerplate.
   exposes versioning;
 - primary not-found applies the selected delete/tombstone policy;
 - sink failure retries without losing the projection key;
-- a sweeper repairs missed deletes when deletion is not finalizer-backed.
+- a sweeper repairs missed deletes when deletion is not finalizer-backed;
+- full-set source failure/incompleteness cannot produce mass deletion;
+- ownership filtering and sync/upsert-only/create-only policies restrict writes;
+- conflicts from multiple inputs and partial batch success recover safely.
 
 ## Verification commands
 
@@ -129,7 +149,9 @@ Select applicable cases; do not create irrelevant boilerplate.
 
 - Assert status condition type, status, reason, severity, and observed
   generation—not only that “an update happened.”
-- Assert action counts for idempotency.
+- Assert action counts for idempotency. Distinguish duplicate business effects,
+  no-op status writes, cardinality bounds, and durable exactly-once accounting;
+  do not assume one assertion proves all four.
 - Avoid `time.Sleep`; use injected clocks or eventual assertions tied to a
   specific watch/reconcile outcome.
 - Make every expected requeue explicit.

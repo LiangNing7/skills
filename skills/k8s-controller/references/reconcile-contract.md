@@ -26,7 +26,7 @@ is still waiting for a dependency or an asynchronous operation.
 | State | Status action | Return |
 |---|---|---|
 | primary not found | normally none; projection/sink may delete or tombstone by key | zero result after absence handling, nil |
-| converged for current generation | Ready/success; set observed generation | zero result, nil, or poll interval for external drift |
+| converged for current generation | Ready/success; observed generation per API contract | zero result, nil, or poll interval for external drift |
 | expected dependency not ready | progress/Unknown condition | rely on a proven watch or `RequeueAfter`, nil |
 | asynchronous create/delete requested | progress condition | explicit requeue/poll, nil |
 | transient API/network failure | failure condition/event when useful | error for rate-limited retry |
@@ -34,8 +34,12 @@ is still waiting for a dependency or an asynchronous operation.
 | invalid/terminal user state | durable failure condition/event | terminal error or zero result; no hot loop |
 | deletion cleanup incomplete | Deleting/progress condition | watch/requeue until absence confirmed |
 
-Use an explicit `complete`/`fullyObserved` boolean when observed generation is
-persisted. Never derive it from `err == nil`.
+Define when this API considers a generation observed/processed. Track that
+separately from progress and convergence; a fully observed generation can still
+be waiting for child readiness or an asynchronous operation. A failed required
+read may prevent acknowledgement, while a stable invalid spec may be fully
+processed. Do not introduce an observedGeneration field or redefine an existing
+one merely to match this example.
 
 ## Top-level loop
 
@@ -92,9 +96,9 @@ func (r *Reconciler) Reconcile(
 	}
 
 	statusBase := obj.DeepCopy()
-	result, fullyObserved, reconcileErr := r.reconcileNormal(ctx, obj)
+	result, generationObserved, reconcileErr := r.reconcileNormal(ctx, obj)
 	r.summarizeStatus(obj)
-	if fullyObserved {
+	if generationObserved { // API-defined acknowledgement, not convergence
 		obj.Status.ObservedGeneration = obj.Generation
 	}
 
@@ -125,9 +129,11 @@ only when it provides that ownership contract.
 
 `reconcileDelete` owns its status/finalizer persistence because deletion may
 need a different patch order and may make the object disappear. A normal-path
-`reconcileNormal` returns `fullyObserved=false` whenever a required read or
-action is incomplete; a stable, fully evaluated user-facing failure may return
-`fullyObserved=true` while setting a failure condition.
+`reconcileNormal` returns an API-defined generation acknowledgement separately
+from its retry result. For example, a controller may acknowledge the spec while
+reporting Progressing as children become ready. A missing input needed to
+evaluate that spec may leave acknowledgement false. Neither partial mutation
+nor nil error decides this universally.
 
 ## Normal convergence
 
@@ -159,9 +165,11 @@ return ctrl.Result{}, true, nil
 
 ### Independent observers
 
-Independent read-only observers may all run so status reports every failure at
-once. Aggregate their errors only when concurrent/independent execution is
-safe. Do not copy an aggregate-errors loop into ordered mutation phases.
+Independent observers may all run so status reports every failure at once.
+Independent mutation sub-reconcilers may also continue when each checks its own
+dependencies and owns disjoint effects. State the dependency graph and gates;
+independence does not imply concurrency is safe. Aggregate errors/results only
+under that contract, rather than copying a continue-all or stop-first loop.
 
 ## Idempotent Kubernetes writes
 
@@ -196,18 +204,48 @@ External systems require stricter crash safety:
 5. use a deterministic external identity when possible;
 6. before a non-deterministic create, persist a create-pending marker or
    idempotency token;
-7. after create/update/delete, persist returned identity/details and poll until
-   observation confirms the requested state;
-8. remove the finalizer only after confirmed absence/cleanup.
+7. distinguish known failure from an unknown result: if create may have succeeded,
+   recover by stable identity/token or stop automatic creation and expose a
+   recovery condition; a pending marker detects ambiguity but is not itself
+   provider idempotency;
+8. after success, persist identity/details and respect any documented
+   read-after-create visibility window before trusting another absent response;
+9. poll for asynchronous convergence and complete the finalizer obligation
+   according to the declared deletion/accounting policy.
 
-Use a bounded context timeout for provider calls. An external API with no event
-source needs a poll `RequeueAfter` even while converged so drift is eventually
-detected.
+Use a bounded context timeout for provider calls. An external API with no reliable event
+source needs polling even while converged so drift is eventually detected.
+Use bounded intervals and jitter where many resources could synchronize calls.
+
+## Collection accounting and projection
+
+For anonymous child sets, expectations or equivalent accounting bridges write
+success and delayed cache observation. Register intended operations before
+writes, consume observations from events, undo expectations for failed or
+skipped writes, and clear them when the parent disappears. Define expiry and
+restart behavior: in-memory expectations do not prove durable exactly-once or
+strict cardinality across failures. Stable identities and indexed discovery
+solve different parts of this problem.
+
+For full-set projection, read authoritative current and desired snapshots,
+normalize/filter them, calculate a plan, then apply only owned changes allowed
+by policy. A failed or incomplete source read must not masquerade as an empty
+set and trigger deletion. Specify snapshot completeness, shared destination
+conflicts, partial apply recovery, and periodic repair of missed events.
 
 ## Finalization
 
-Do not add a finalizer when owner-reference garbage collection fully expresses
-cleanup and no external/non-owned resource must be handled.
+Add a finalizer only for a concrete obligation before the protected object may
+disappear. Owner-reference GC can handle lifecycle cleanup, but cannot replace
+durable completion accounting. Job-style tracking first persists uncounted
+terminal identities, then releases child finalizers, then folds those identities
+into counters without losing or double-counting results. Finalizers may protect
+a child as well as the primary.
+
+Define the completion guarantee: confirmed absence, accepted deletion with
+explicitly weaker guarantees, or preservation/orphaning. Prefer confirmed
+absence for new external cleanup contracts; preserve an existing API's declared
+policy. Do not silently weaken it to copy an upstream example.
 
 Deletion reconciliation is its own idempotent state machine:
 
@@ -217,7 +255,7 @@ deletion timestamp?
 ├── cleanup not requested → request cleanup, persist progress, requeue
 ├── cleanup still visible → wait/requeue
 ├── cleanup failed transiently → condition + error
-└── cleanup confirmed → remove only our finalizer with optimistic patch
+└── declared obligation satisfied → remove only our finalizer with optimistic patch
 ```
 
 Never remove other controllers' finalizers. If cleanup depends on resources
@@ -238,11 +276,12 @@ Status is a public contract, not a log buffer.
 - Failure messages are concise and safe for users; detailed errors stay in logs.
 - Status writes use the status subresource and a conflict-safe patch/retry path.
 
-Set `ObservedGeneration = metadata.generation` only when all inputs needed to
-evaluate the generation were successfully observed. It can be correct to set it
-while reporting a stable user-facing failure (the generation was fully
-evaluated and found invalid), but not while waiting on an unread dependency or
-after a partial mutation.
+Set `ObservedGeneration = metadata.generation` at the observation/processing
+boundary defined by this API. Keep Ready, Progressing, replica counts, and
+external operation completion separate. StatefulSet-like APIs may acknowledge
+the generation while work remains; a contract needing an unread dependency may
+withhold acknowledgement. Condition-level observedGeneration and an overall
+status field can have different owners and boundaries.
 
 ## Requeue and error semantics
 
